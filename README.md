@@ -29,7 +29,7 @@ Restart ComfyUI.
 ### Usage
 
 1. Search node: **"Multi Prompt Generator"**
-2. Connect: Model, CLIP, VAE, Empty Latent, (optional) Upscale Model
+2. Connect: Model, CLIP, VAE, Empty Latent, Upscale Model
 3. Enter prompt list — one per line:
 ```
 smile, happy, bright eyes
@@ -48,6 +48,7 @@ crying, tears
 | clip | CLIP | CLIP model |
 | vae | VAE | VAE model |
 | latent | LATENT | Empty Latent Image |
+| upscale_model | UPSCALE_MODEL | Upscale model (e.g., 2x-AnimeSharp) |
 | base_prompt | STRING | Base prompt (combined with each line) |
 | negative_prompt | STRING | Negative prompt |
 | prompt_list | STRING | Prompt list (line-separated) |
@@ -61,7 +62,6 @@ crying, tears
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| upscale_model | UPSCALE_MODEL | - | Upscale model |
 | scale_factor | FLOAT | 0.7 | Downscale ratio after upscale |
 | upscale_steps | INT | 15 | 2nd pass steps |
 | upscale_cfg | FLOAT | 5.0 | 2nd pass CFG |
@@ -128,7 +128,7 @@ ComfyUI 재시작.
 ### 사용법
 
 1. 노드 검색: **"Multi Prompt Generator"**
-2. 연결: Model, CLIP, VAE, Empty Latent, (선택) Upscale Model
+2. 연결: Model, CLIP, VAE, Empty Latent, Upscale Model
 3. 프롬프트 리스트 입력 — 한 줄에 하나씩:
 ```
 smile, happy, bright eyes
@@ -147,6 +147,7 @@ crying, tears
 | clip | CLIP | CLIP 모델 |
 | vae | VAE | VAE 모델 |
 | latent | LATENT | Empty Latent Image |
+| upscale_model | UPSCALE_MODEL | 업스케일 모델 (예: 2x-AnimeSharp) |
 | base_prompt | STRING | 기본 프롬프트 (각 줄과 결합됨) |
 | negative_prompt | STRING | 네거티브 프롬프트 |
 | prompt_list | STRING | 프롬프트 리스트 (줄바꿈 구분) |
@@ -160,7 +161,6 @@ crying, tears
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| upscale_model | UPSCALE_MODEL | - | 업스케일 모델 |
 | scale_factor | FLOAT | 0.7 | 업스케일 후 다운스케일 비율 |
 | upscale_steps | INT | 15 | 2차 샘플링 스텝 |
 | upscale_cfg | FLOAT | 5.0 | 2차 CFG |
