@@ -180,7 +180,6 @@ class MultiPromptGenerator:
                 "steps": ("INT", {"default": 30, "min": 1, "max": 200}),
                 "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.1}),
                 "enable_upscale": ("BOOLEAN", {"default": True}),
-                "enable_preview": ("BOOLEAN", {"default": True}),
                 "save_prefix": ("STRING", {"default": "MultiPrompt"}),
             },
             "optional": {
@@ -189,8 +188,10 @@ class MultiPromptGenerator:
                 "upscale_steps": ("INT", {"default": 15, "min": 1, "max": 200}),
                 "upscale_cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.1}),
                 "upscale_denoise": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "size_alignment": (["64", "8", "none"],),
                 "lut_name": (get_lut_files(),),
                 "lut_strength": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "enable_preview": ("BOOLEAN", {"default": True}),
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
@@ -284,20 +285,25 @@ class MultiPromptGenerator:
         s = torch.clamp(s.movedim(-3, -1), min=0, max=1.0)
         return s
 
-    def resize_to_64(self, image, scale_factor):
-        """이미지를 64배수 크기로 리사이즈"""
+    def resize_with_alignment(self, image, scale_factor, alignment="64"):
+        """이미지를 지정된 배수 크기로 리사이즈"""
         batch, height, width, channels = image.shape
         
         new_width = int(width * scale_factor)
         new_height = int(height * scale_factor)
         
-        # 64배수로 반올림
-        new_width = ((new_width + 32) // 64) * 64
-        new_height = ((new_height + 32) // 64) * 64
-        
-        # 최소 크기 보장
-        new_width = max(64, new_width)
-        new_height = max(64, new_height)
+        # 배수 정렬
+        if alignment == "64":
+            new_width = ((new_width + 32) // 64) * 64
+            new_height = ((new_height + 32) // 64) * 64
+            new_width = max(64, new_width)
+            new_height = max(64, new_height)
+        elif alignment == "8":
+            new_width = ((new_width + 4) // 8) * 8
+            new_height = ((new_height + 4) // 8) * 8
+            new_width = max(8, new_width)
+            new_height = max(8, new_height)
+        # "none"이면 그대로
         
         # BCHW로 변환 후 리사이즈
         samples = image.movedim(-1, 1)
@@ -348,10 +354,10 @@ class MultiPromptGenerator:
         })
 
     def generate(self, model, clip, vae, latent, base_prompt, negative_prompt, prompt_list,
-                 seed, steps, cfg, enable_upscale, enable_preview, save_prefix,
+                 seed, steps, cfg, enable_upscale, save_prefix,
                  upscale_model=None, scale_factor=0.7, upscale_steps=15, 
-                 upscale_cfg=5.0, upscale_denoise=0.5,
-                 lut_name="None", lut_strength=0.3, unique_id=None):
+                 upscale_cfg=5.0, upscale_denoise=0.5, size_alignment="64",
+                 lut_name="None", lut_strength=0.3, enable_preview=True, unique_id=None):
         
         # prompt_list 파싱
         lines = [line.strip() for line in prompt_list.strip().split("\n") if line.strip()]
@@ -406,7 +412,7 @@ class MultiPromptGenerator:
                 upscaled = self.upscale_with_model(upscale_model, image)
                 
                 # 64배수로 리사이즈
-                resized = self.resize_to_64(upscaled, scale_factor)
+                resized = self.resize_with_alignment(upscaled, scale_factor, size_alignment)
                 
                 # VAE 인코딩 → 2차 샘플링 → 디코딩
                 latent_up = self.encode_vae(vae, resized)
@@ -431,7 +437,14 @@ class MultiPromptGenerator:
             all_images.append(image)
         
         print(f"[MultiPrompt] Complete! Generated {len(all_images)} images.")
-        return {"ui": {"images": []}, "result": (all_images,)}
+        
+        # 마지막 프리뷰 정보 반환 (UI에 유지)
+        ui_images = []
+        if enable_preview and unique_id is not None and len(lines) > 0:
+            last_preview = f"multiprompt_preview_{unique_id}_{len(lines)-1}.png"
+            ui_images = [{"filename": last_preview, "subfolder": "", "type": "temp"}]
+        
+        return {"ui": {"images": ui_images}, "result": (all_images,)}
 
     def _get_next_counter(self, prefix):
         """다음 카운터 번호"""
