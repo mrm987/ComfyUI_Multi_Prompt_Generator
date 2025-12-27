@@ -188,7 +188,7 @@ class MultiPromptGenerator:
                 "upscale_model": ("UPSCALE_MODEL",),
                 "base_prompt": ("STRING", {"multiline": True, "default": "1girl, solo,"}),
                 "negative_prompt": ("STRING", {"multiline": True, "default": "lowres, bad quality,"}),
-                "prompt_list": ("STRING", {"multiline": True, "default": "# Separate prompts with blank lines\n# 빈 줄로 프롬프트 구분\n\nsmile, happy,\nbright eyes\n\nangry, furrowed brow\n\nsad, crying, tears"}),
+                "prompt_list": ("STRING", {"multiline": True, "default": "# Blank line = new prompt\n# 빈 줄 = 새 프롬프트\n# Use skip_indices to skip (e.g. 3,4,7)\n\nsmile, happy,\nbright eyes\n\nangry, furrowed brow\n\nsad, crying, tears"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "steps": ("INT", {"default": 30, "min": 1, "max": 200}),
                 "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.1}),
@@ -198,6 +198,7 @@ class MultiPromptGenerator:
                 "save_prefix": ("STRING", {"default": "MultiPrompt"}),
             },
             "optional": {
+                "skip_indices": ("STRING", {"default": "", "placeholder": "e.g. 3,4,7"}),
                 "downscale_ratio": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 1.0, "step": 0.01}),
                 "upscale_steps": ("INT", {"default": 15, "min": 1, "max": 200}),
                 "upscale_cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.1}),
@@ -385,22 +386,44 @@ class MultiPromptGenerator:
 
     def generate(self, model, clip, vae, latent, upscale_model, base_prompt, negative_prompt, prompt_list,
                  seed, steps, cfg, sampler_name, scheduler, enable_upscale, save_prefix,
-                 downscale_ratio=0.7, upscale_steps=15, 
+                 skip_indices="", downscale_ratio=0.7, upscale_steps=15, 
                  upscale_cfg=5.0, upscale_denoise=0.5, size_alignment="none",
                  lut_name="None", lut_strength=0.3, enable_preview=True, 
                  unique_id=None, prompt=None, extra_pnginfo=None):
         
-        # prompt_list 파싱 (빈 줄로 구분, # 주석 무시)
+        # prompt_list 파싱 (빈 줄로 구분, # 주석 무시, - 시작하면 블록 스킵)
         blocks = prompt_list.strip().split("\n\n")
         lines = []
         for block in blocks:
+            block_lines = [line.strip() for line in block.strip().split("\n") if line.strip()]
+            if not block_lines:
+                continue
+            
+            # 첫 번째 유효 줄(주석 아닌)이 -로 시작하면 블록 스킵
+            first_content = None
+            for line in block_lines:
+                if not line.startswith("#"):
+                    first_content = line
+                    break
+            
+            if first_content and first_content.startswith("-"):
+                continue  # 블록 스킵
+            
             # 블록 내 줄바꿈을 공백으로 합침, # 주석 제외
             merged = " ".join(
-                line.strip() for line in block.strip().split("\n") 
-                if line.strip() and not line.strip().startswith("#")
+                line.strip() for line in block_lines 
+                if not line.startswith("#")
             )
             if merged:
                 lines.append(merged)
+        
+        # skip_indices 파싱 (1-based)
+        skip_set = set()
+        if skip_indices.strip():
+            for part in skip_indices.split(","):
+                part = part.strip()
+                if part.isdigit():
+                    skip_set.add(int(part))
         
         if not lines:
             raise ValueError("prompt_list가 비어있습니다.")
@@ -421,6 +444,11 @@ class MultiPromptGenerator:
         counter = self._get_next_counter(save_prefix)
         
         for idx, line in enumerate(lines):
+            # skip_indices에 있으면 스킵 (1-based)
+            if (idx + 1) in skip_set:
+                print(f"[MultiPrompt] Skipping {idx + 1}/{len(lines)}: {line[:40]}...")
+                continue
+            
             print(f"[MultiPrompt] Processing {idx + 1}/{len(lines)}: {line[:40]}...")
             
             # 파일명: 순번 + 첫 태그

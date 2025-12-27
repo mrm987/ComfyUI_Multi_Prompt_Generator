@@ -33,11 +33,12 @@ Restart ComfyUI.
 3. Enter prompt list — separate with blank lines:
 ```
 # Lines starting with # are comments
+# Start with - to skip
 
 smile, happy, bright eyes,
 looking at viewer
 
-angry, furrowed brow,
+-angry, furrowed brow,
 clenched teeth, glaring
 
 sad, downcast eyes, frown
@@ -69,6 +70,7 @@ sad, downcast eyes, frown
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
+| skip_indices | STRING | "" | Prompt numbers to skip (e.g. "3,4,7") |
 | downscale_ratio | FLOAT | 0.7 | Downscale ratio after upscale |
 | upscale_steps | INT | 15 | 2nd pass steps |
 | upscale_cfg | FLOAT | 5.0 | 2nd pass CFG |
@@ -104,7 +106,7 @@ For each prompt:
 
 ### Notes
 
-- **Prompt format**: Separate prompts with blank lines. Lines starting with `#` are ignored
+- **Prompt format**: Separate prompts with blank lines. Lines starting with `#` are comments. Start first line with `-` to skip that block
 - **size_alignment**: 64 is safest. Use 64 if you see white edges
 - **LUT files**: Auto-detected from `comfyui-propost/LUTs/` or `models/luts/` folder
 - **Preview**: Check 1st pass result, cancel with Cancel button if not satisfied
@@ -141,11 +143,12 @@ ComfyUI 재시작.
 3. 프롬프트 리스트 입력 — 빈 줄로 구분:
 ```
 # #으로 시작하는 줄은 주석
+# -로 시작하면 스킵
 
 smile, happy, bright eyes,
 looking at viewer
 
-angry, furrowed brow,
+-angry, furrowed brow,
 clenched teeth, glaring
 
 sad, downcast eyes, frown
@@ -177,6 +180,7 @@ sad, downcast eyes, frown
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
+| skip_indices | STRING | "" | 스킵할 프롬프트 번호 (예: "3,4,7") |
 | downscale_ratio | FLOAT | 0.7 | 업스케일 후 다운스케일 비율 |
 | upscale_steps | INT | 15 | 2차 샘플링 스텝 |
 | upscale_cfg | FLOAT | 5.0 | 2차 CFG |
@@ -212,7 +216,7 @@ output/[save_prefix]/03_sad_00001.png
 
 ### 참고
 
-- **프롬프트 형식**: 빈 줄로 프롬프트 구분. `#`으로 시작하는 줄은 무시됨
+- **프롬프트 형식**: 빈 줄로 프롬프트 구분. `#`으로 시작하는 줄은 주석. 첫 줄이 `-`로 시작하면 해당 블록 스킵
 - **size_alignment**: 64가 가장 안전. 흰 테두리 생기면 64 사용
 - **LUT 파일**: `comfyui-propost/LUTs/` 또는 `models/luts/` 폴더의 .cube 파일 자동 인식
 - **프리뷰**: 1차 결과 확인 후 마음에 안 들면 Cancel로 중단 가능
