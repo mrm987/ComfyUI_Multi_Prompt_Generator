@@ -30,12 +30,17 @@ Restart ComfyUI.
 
 1. Search node: **"Multi Prompt Generator"**
 2. Connect: Model, CLIP, VAE, Empty Latent, Upscale Model
-3. Enter prompt list — one per line:
+3. Enter prompt list — separate with blank lines:
 ```
-smile, happy, bright eyes
-angry, furrowed brow
-sad, downcast eyes
-crying, tears
+# Lines starting with # are comments
+
+smile, happy, bright eyes,
+looking at viewer
+
+angry, furrowed brow,
+clenched teeth, glaring
+
+sad, downcast eyes, frown
 ```
 
 ### Inputs
@@ -68,7 +73,7 @@ crying, tears
 | upscale_steps | INT | 15 | 2nd pass steps |
 | upscale_cfg | FLOAT | 5.0 | 2nd pass CFG |
 | upscale_denoise | FLOAT | 0.5 | 2nd pass denoise |
-| size_alignment | COMBO | "64" | Size alignment (64 / 8 / none) |
+| size_alignment | COMBO | "none" | Size alignment (none / 8 / 64) |
 | lut_name | COMBO | "None" | LUT file selection |
 | lut_strength | FLOAT | 0.3 | LUT strength |
 | enable_preview | BOOL | True | Real-time preview |
@@ -99,6 +104,7 @@ For each prompt:
 
 ### Notes
 
+- **Prompt format**: Separate prompts with blank lines. Lines starting with `#` are ignored
 - **size_alignment**: 64 is safest. Use 64 if you see white edges
 - **LUT files**: Auto-detected from `comfyui-propost/LUTs/` or `models/luts/` folder
 - **Preview**: Check 1st pass result, cancel with Cancel button if not satisfied
@@ -132,12 +138,17 @@ ComfyUI 재시작.
 
 1. 노드 검색: **"Multi Prompt Generator"**
 2. 연결: Model, CLIP, VAE, Empty Latent, Upscale Model
-3. 프롬프트 리스트 입력 — 한 줄에 하나씩:
+3. 프롬프트 리스트 입력 — 빈 줄로 구분:
 ```
-smile, happy, bright eyes
-angry, furrowed brow
-sad, downcast eyes
-crying, tears
+# #으로 시작하는 줄은 주석
+
+smile, happy, bright eyes,
+looking at viewer
+
+angry, furrowed brow,
+clenched teeth, glaring
+
+sad, downcast eyes, frown
 ```
 
 ### 입력
@@ -170,7 +181,7 @@ crying, tears
 | upscale_steps | INT | 15 | 2차 샘플링 스텝 |
 | upscale_cfg | FLOAT | 5.0 | 2차 CFG |
 | upscale_denoise | FLOAT | 0.5 | 2차 디노이즈 |
-| size_alignment | COMBO | "64" | 크기 정렬 (64 / 8 / none) |
+| size_alignment | COMBO | "none" | 크기 정렬 (none / 8 / 64) |
 | lut_name | COMBO | "None" | LUT 파일 선택 |
 | lut_strength | FLOAT | 0.3 | LUT 강도 |
 | enable_preview | BOOL | True | 실시간 프리뷰 |
@@ -201,6 +212,7 @@ output/[save_prefix]/03_sad_00001.png
 
 ### 참고
 
+- **프롬프트 형식**: 빈 줄로 프롬프트 구분. `#`으로 시작하는 줄은 무시됨
 - **size_alignment**: 64가 가장 안전. 흰 테두리 생기면 64 사용
 - **LUT 파일**: `comfyui-propost/LUTs/` 또는 `models/luts/` 폴더의 .cube 파일 자동 인식
 - **프리뷰**: 1차 결과 확인 후 마음에 안 들면 Cancel로 중단 가능

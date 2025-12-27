@@ -186,9 +186,9 @@ class MultiPromptGenerator:
                 "vae": ("VAE",),
                 "latent": ("LATENT",),
                 "upscale_model": ("UPSCALE_MODEL",),
-                "base_prompt": ("STRING", {"forceInput": True}),
-                "negative_prompt": ("STRING", {"forceInput": True}),
-                "prompt_list": ("STRING", {"multiline": True, "default": "smile, happy\nangry, furrowed brow\nsad, crying"}),
+                "base_prompt": ("STRING", {"multiline": True, "default": "1girl, solo,"}),
+                "negative_prompt": ("STRING", {"multiline": True, "default": "lowres, bad quality,"}),
+                "prompt_list": ("STRING", {"multiline": True, "default": "# Separate prompts with blank lines\n# 빈 줄로 프롬프트 구분\n\nsmile, happy,\nbright eyes\n\nangry, furrowed brow\n\nsad, crying, tears"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "steps": ("INT", {"default": 30, "min": 1, "max": 200}),
                 "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.1}),
@@ -202,7 +202,7 @@ class MultiPromptGenerator:
                 "upscale_steps": ("INT", {"default": 15, "min": 1, "max": 200}),
                 "upscale_cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.1}),
                 "upscale_denoise": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
-                "size_alignment": (["64", "8", "none"],),
+                "size_alignment": (["none", "8", "64"], {"default": "none"}),
                 "lut_name": (get_lut_files(),),
                 "lut_strength": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "enable_preview": ("BOOLEAN", {"default": True}),
@@ -386,12 +386,21 @@ class MultiPromptGenerator:
     def generate(self, model, clip, vae, latent, upscale_model, base_prompt, negative_prompt, prompt_list,
                  seed, steps, cfg, sampler_name, scheduler, enable_upscale, save_prefix,
                  downscale_ratio=0.7, upscale_steps=15, 
-                 upscale_cfg=5.0, upscale_denoise=0.5, size_alignment="64",
+                 upscale_cfg=5.0, upscale_denoise=0.5, size_alignment="none",
                  lut_name="None", lut_strength=0.3, enable_preview=True, 
                  unique_id=None, prompt=None, extra_pnginfo=None):
         
-        # prompt_list 파싱
-        lines = [line.strip() for line in prompt_list.strip().split("\n") if line.strip()]
+        # prompt_list 파싱 (빈 줄로 구분, # 주석 무시)
+        blocks = prompt_list.strip().split("\n\n")
+        lines = []
+        for block in blocks:
+            # 블록 내 줄바꿈을 공백으로 합침, # 주석 제외
+            merged = " ".join(
+                line.strip() for line in block.strip().split("\n") 
+                if line.strip() and not line.strip().startswith("#")
+            )
+            if merged:
+                lines.append(merged)
         
         if not lines:
             raise ValueError("prompt_list가 비어있습니다.")
