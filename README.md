@@ -55,6 +55,8 @@ crying, tears
 | seed | INT | Seed |
 | steps | INT | Sampling steps (default: 30) |
 | cfg | FLOAT | CFG scale (default: 5.0) |
+| sampler_name | COMBO | Sampler (euler_ancestral, etc.) |
+| scheduler | COMBO | Scheduler (normal, karras, etc.) |
 | enable_upscale | BOOL | Enable upscale (default: True) |
 | save_prefix | STRING | Output folder name (default: "MultiPrompt") |
 
@@ -100,6 +102,7 @@ For each prompt:
 - **size_alignment**: 64 is safest. Use 64 if you see white edges
 - **LUT files**: Auto-detected from `comfyui-propost/LUTs/` or `models/luts/` folder
 - **Preview**: Check 1st pass result, cancel with Cancel button if not satisfied
+- **Metadata**: Workflow info saved in PNG, can drag back into ComfyUI
 
 ---
 
@@ -154,6 +157,8 @@ crying, tears
 | seed | INT | 시드 |
 | steps | INT | 샘플링 스텝 (기본: 30) |
 | cfg | FLOAT | CFG 스케일 (기본: 5.0) |
+| sampler_name | COMBO | 샘플러 (euler_ancestral 등) |
+| scheduler | COMBO | 스케줄러 (normal, karras 등) |
 | enable_upscale | BOOL | 업스케일 활성화 (기본: True) |
 | save_prefix | STRING | 저장 폴더명 (기본: "MultiPrompt") |
 
@@ -199,6 +204,7 @@ output/[save_prefix]/03_sad_00001.png
 - **size_alignment**: 64가 가장 안전. 흰 테두리 생기면 64 사용
 - **LUT 파일**: `comfyui-propost/LUTs/` 또는 `models/luts/` 폴더의 .cube 파일 자동 인식
 - **프리뷰**: 1차 결과 확인 후 마음에 안 들면 Cancel로 중단 가능
+- **메타데이터**: 워크플로우 정보가 PNG에 저장되어 ComfyUI에 다시 드래그 가능
 
 ---
 

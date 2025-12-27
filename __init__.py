@@ -93,67 +93,79 @@ def parse_cube_lut(lut_path):
     if lut_size == 0 or len(lut_data) == 0:
         return None, 0
     
-    return np.array(lut_data, dtype=np.float32), lut_size
+    # cube 파일은 R이 가장 빠르게 변함 -> Fortran order로 reshape
+    lut_array = np.array(lut_data, dtype=np.float32)
+    lut_3d = np.reshape(lut_array, (lut_size, lut_size, lut_size, 3), order='F')
+    
+    return lut_3d, lut_size
 
 
-def apply_lut(image, lut_data, lut_size, strength=1.0):
-    """Apply 3D LUT to image"""
-    if lut_data is None:
+def apply_lut(image, lut_3d, lut_size, strength=1.0):
+    """Apply 3D LUT to image using trilinear interpolation"""
+    if lut_3d is None or strength <= 0:
         return image
     
     # image: [B, H, W, C] tensor, 0-1 range
-    img_np = image.cpu().numpy()
-    result = np.zeros_like(img_np)
+    img_np = image.cpu().to(torch.float32).numpy()
+    result = []
     
     for b in range(img_np.shape[0]):
-        img = img_np[b]
-        h, w, c = img.shape
+        img = img_np[b][:, :, :3].copy()
+        img = np.clip(img, 0, 1)
         
-        # Reshape LUT
-        lut_3d = lut_data.reshape((lut_size, lut_size, lut_size, 3))
+        # 이미지를 LUT 인덱스로 스케일
+        h, w, _ = img.shape
+        img_flat = img.reshape(-1, 3)
         
-        # Scale image to LUT indices
-        img_scaled = img * (lut_size - 1)
+        # 스케일링
+        coords = img_flat * (lut_size - 1)
         
-        # Get integer indices and fractions for trilinear interpolation
-        idx_low = np.floor(img_scaled).astype(np.int32)
-        idx_high = np.ceil(img_scaled).astype(np.int32)
-        frac = img_scaled - idx_low
+        # 정수 인덱스와 소수 부분
+        coords_floor = np.floor(coords).astype(np.int32)
+        coords_ceil = np.minimum(coords_floor + 1, lut_size - 1)
+        frac = coords - coords_floor
         
-        # Clamp indices
-        idx_low = np.clip(idx_low, 0, lut_size - 1)
-        idx_high = np.clip(idx_high, 0, lut_size - 1)
+        # 인덱스 클램프
+        coords_floor = np.clip(coords_floor, 0, lut_size - 1)
         
-        # Trilinear interpolation
-        r_low, g_low, b_low = idx_low[:,:,0], idx_low[:,:,1], idx_low[:,:,2]
-        r_high, g_high, b_high = idx_high[:,:,0], idx_high[:,:,1], idx_high[:,:,2]
-        r_frac, g_frac, b_frac = frac[:,:,0:1], frac[:,:,1:2], frac[:,:,2:3]
+        r0, g0, b0 = coords_floor[:, 0], coords_floor[:, 1], coords_floor[:, 2]
+        r1, g1, b1 = coords_ceil[:, 0], coords_ceil[:, 1], coords_ceil[:, 2]
+        fr, fg, fb = frac[:, 0], frac[:, 1], frac[:, 2]
         
-        # 8 corners of the cube
-        c000 = lut_3d[r_low, g_low, b_low]
-        c001 = lut_3d[r_low, g_low, b_high]
-        c010 = lut_3d[r_low, g_high, b_low]
-        c011 = lut_3d[r_low, g_high, b_high]
-        c100 = lut_3d[r_high, g_low, b_low]
-        c101 = lut_3d[r_high, g_low, b_high]
-        c110 = lut_3d[r_high, g_high, b_low]
-        c111 = lut_3d[r_high, g_high, b_high]
+        # 8개 꼭짓점 값
+        c000 = lut_3d[r0, g0, b0]
+        c001 = lut_3d[r0, g0, b1]
+        c010 = lut_3d[r0, g1, b0]
+        c011 = lut_3d[r0, g1, b1]
+        c100 = lut_3d[r1, g0, b0]
+        c101 = lut_3d[r1, g0, b1]
+        c110 = lut_3d[r1, g1, b0]
+        c111 = lut_3d[r1, g1, b1]
         
-        # Interpolate
-        c00 = c000 * (1 - r_frac) + c100 * r_frac
-        c01 = c001 * (1 - r_frac) + c101 * r_frac
-        c10 = c010 * (1 - r_frac) + c110 * r_frac
-        c11 = c011 * (1 - r_frac) + c111 * r_frac
+        # 8개 가중치 (colour-science 방식)
+        w000 = ((1 - fr) * (1 - fg) * (1 - fb))[:, None]
+        w001 = ((1 - fr) * (1 - fg) * fb)[:, None]
+        w010 = ((1 - fr) * fg * (1 - fb))[:, None]
+        w011 = ((1 - fr) * fg * fb)[:, None]
+        w100 = (fr * (1 - fg) * (1 - fb))[:, None]
+        w101 = (fr * (1 - fg) * fb)[:, None]
+        w110 = (fr * fg * (1 - fb))[:, None]
+        w111 = (fr * fg * fb)[:, None]
         
-        c0 = c00 * (1 - g_frac) + c10 * g_frac
-        c1 = c01 * (1 - g_frac) + c11 * g_frac
+        # trilinear interpolation
+        lut_result = (c000 * w000 + c001 * w001 + c010 * w010 + c011 * w011 +
+                      c100 * w100 + c101 * w101 + c110 * w110 + c111 * w111)
         
-        lut_result = c0 * (1 - b_frac) + c1 * b_frac
+        lut_result = lut_result.reshape(h, w, 3)
         
-        # Blend with original based on strength
-        result[b] = img * (1 - strength) + lut_result * strength
+        # strength 블렌딩
+        if strength < 1.0:
+            lut_result = img * (1 - strength) + lut_result * strength
+        
+        lut_result = np.clip(lut_result, 0, 1).astype(np.float32)
+        result.append(lut_result)
     
-    result = np.clip(result, 0, 1)
+    result = np.stack(result, axis=0)
     return torch.from_numpy(result).to(image.device)
 
 
@@ -180,6 +192,8 @@ class MultiPromptGenerator:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "steps": ("INT", {"default": 30, "min": 1, "max": 200}),
                 "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.1}),
+                "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
+                "scheduler": (comfy.samplers.KSampler.SCHEDULERS,),
                 "enable_upscale": ("BOOLEAN", {"default": True}),
                 "save_prefix": ("STRING", {"default": "MultiPrompt"}),
             },
@@ -195,6 +209,8 @@ class MultiPromptGenerator:
             },
             "hidden": {
                 "unique_id": "UNIQUE_ID",
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
             }
         }
     
@@ -211,7 +227,7 @@ class MultiPromptGenerator:
         cond, pooled = clip.encode_from_tokens(tokens, return_pooled=True)
         return [[cond, {"pooled_output": pooled}]]
 
-    def do_sample(self, model, seed, steps, cfg, positive, negative, latent_image, denoise=1.0):
+    def do_sample(self, model, seed, steps, cfg, sampler_name, scheduler, positive, negative, latent_image, denoise=1.0):
         """샘플링 실행"""
         device = comfy.model_management.get_torch_device()
         latent = latent_image.clone().to(device)
@@ -223,8 +239,8 @@ class MultiPromptGenerator:
             noise, 
             steps, 
             cfg, 
-            "euler_ancestral",
-            "normal",
+            sampler_name,
+            scheduler,
             positive, 
             negative, 
             latent,
@@ -312,8 +328,11 @@ class MultiPromptGenerator:
         
         return s
 
-    def save_image(self, image, prefix, filename, counter):
-        """이미지 저장"""
+    def save_image(self, image, prefix, filename, counter, prompt=None, extra_pnginfo=None):
+        """이미지 저장 (메타데이터 포함)"""
+        import json
+        from PIL.PngImagePlugin import PngInfo
+        
         full_output_folder = os.path.join(self.output_dir, prefix)
         os.makedirs(full_output_folder, exist_ok=True)
         
@@ -323,23 +342,34 @@ class MultiPromptGenerator:
         img = image[0].cpu().numpy()
         img = (img * 255).astype(np.uint8)
         pil_img = Image.fromarray(img)
-        pil_img.save(filepath, compress_level=4)
+        
+        # 메타데이터 추가
+        metadata = PngInfo()
+        if prompt is not None:
+            metadata.add_text("prompt", json.dumps(prompt))
+        if extra_pnginfo is not None:
+            for key, value in extra_pnginfo.items():
+                metadata.add_text(key, json.dumps(value))
+        
+        pil_img.save(filepath, pnginfo=metadata, compress_level=4)
         
         print(f"[MultiPrompt] Saved: {filepath}")
         return filepath
 
-    def send_preview(self, image, unique_id, idx):
+    def send_preview(self, image, unique_id, idx, stage=""):
         """생성 중 프리뷰를 UI로 전송"""
+        import time
         temp_dir = folder_paths.get_temp_directory()
         
-        # temp 폴더에 프리뷰 저장
-        preview_filename = f"multiprompt_preview_{unique_id}_{idx}.png"
+        # temp 폴더에 프리뷰 저장 (타임스탬프로 캐시 우회)
+        timestamp = int(time.time() * 1000)
+        preview_filename = f"multiprompt_preview_{unique_id}_{idx}_{stage}_{timestamp}.png"
         preview_path = os.path.join(temp_dir, preview_filename)
         
         img = image[0].cpu().numpy()
         img = (img * 255).astype(np.uint8)
         pil_img = Image.fromarray(img)
-        pil_img.save(preview_path, compress_level=4)
+        pil_img.save(preview_path, compress_level=1)
         
         # UI로 프리뷰 전송
         PromptServer.instance.send_sync("executed", {
@@ -354,10 +384,11 @@ class MultiPromptGenerator:
         })
 
     def generate(self, model, clip, vae, latent, upscale_model, base_prompt, negative_prompt, prompt_list,
-                 seed, steps, cfg, enable_upscale, save_prefix,
+                 seed, steps, cfg, sampler_name, scheduler, enable_upscale, save_prefix,
                  downscale_ratio=0.7, upscale_steps=15, 
                  upscale_cfg=5.0, upscale_denoise=0.5, size_alignment="64",
-                 lut_name="None", lut_strength=0.3, enable_preview=True, unique_id=None):
+                 lut_name="None", lut_strength=0.3, enable_preview=True, 
+                 unique_id=None, prompt=None, extra_pnginfo=None):
         
         # prompt_list 파싱
         lines = [line.strip() for line in prompt_list.strip().split("\n") if line.strip()]
@@ -396,7 +427,7 @@ class MultiPromptGenerator:
             
             # 1단계: 기본 샘플링
             samples = self.do_sample(
-                model, seed, steps, cfg,
+                model, seed, steps, cfg, sampler_name, scheduler,
                 positive_cond, negative_cond,
                 latent_samples, denoise=1.0
             )
@@ -404,7 +435,7 @@ class MultiPromptGenerator:
             
             # 1차 결과 프리뷰 전송
             if enable_preview and unique_id is not None:
-                self.send_preview(image, unique_id, idx)
+                self.send_preview(image, unique_id, idx, "1st")
             
             # 2단계: 업스케일
             if enable_upscale and upscale_model is not None:
@@ -418,7 +449,7 @@ class MultiPromptGenerator:
                 latent_up = self.encode_vae(vae, resized)
                 
                 samples_up = self.do_sample(
-                    model, seed, upscale_steps, upscale_cfg,
+                    model, seed, upscale_steps, upscale_cfg, sampler_name, scheduler,
                     positive_cond, negative_cond,
                     latent_up, denoise=upscale_denoise
                 )
@@ -430,21 +461,16 @@ class MultiPromptGenerator:
             
             # 최종 결과 프리뷰 교체
             if enable_preview and unique_id is not None:
-                self.send_preview(image, unique_id, idx)
+                self.send_preview(image, unique_id, idx, "final")
             
             # 저장
-            self.save_image(image, save_prefix, filename, counter)
+            self.save_image(image, save_prefix, filename, counter, prompt, extra_pnginfo)
             all_images.append(image)
         
         print(f"[MultiPrompt] Complete! Generated {len(all_images)} images.")
         
-        # 마지막 프리뷰 정보 반환 (UI에 유지)
-        ui_images = []
-        if enable_preview and unique_id is not None and len(lines) > 0:
-            last_preview = f"multiprompt_preview_{unique_id}_{len(lines)-1}.png"
-            ui_images = [{"filename": last_preview, "subfolder": "", "type": "temp"}]
-        
-        return {"ui": {"images": ui_images}, "result": (all_images,)}
+        # 마지막 프리뷰는 이미 send_preview로 전송됨
+        return {"ui": {"images": []}, "result": (all_images,)}
 
     def _get_next_counter(self, prefix):
         """다음 카운터 번호"""
