@@ -173,8 +173,9 @@ class MultiPromptGenerator:
                 "clip": ("CLIP",),
                 "vae": ("VAE",),
                 "latent": ("LATENT",),
-                "base_prompt": ("STRING", {"multiline": True, "default": "1girl, solo,"}),
-                "negative_prompt": ("STRING", {"multiline": True, "default": "lowres, bad quality,"}),
+                "upscale_model": ("UPSCALE_MODEL",),
+                "base_prompt": ("STRING", {"forceInput": True}),
+                "negative_prompt": ("STRING", {"forceInput": True}),
                 "prompt_list": ("STRING", {"multiline": True, "default": "smile, happy\nangry, furrowed brow\nsad, crying"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
                 "steps": ("INT", {"default": 30, "min": 1, "max": 200}),
@@ -183,8 +184,7 @@ class MultiPromptGenerator:
                 "save_prefix": ("STRING", {"default": "MultiPrompt"}),
             },
             "optional": {
-                "upscale_model": ("UPSCALE_MODEL",),
-                "scale_factor": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 1.0, "step": 0.01}),
+                "downscale_ratio": ("FLOAT", {"default": 0.7, "min": 0.1, "max": 1.0, "step": 0.01}),
                 "upscale_steps": ("INT", {"default": 15, "min": 1, "max": 200}),
                 "upscale_cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.1}),
                 "upscale_denoise": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 1.0, "step": 0.01}),
@@ -353,9 +353,9 @@ class MultiPromptGenerator:
             }
         })
 
-    def generate(self, model, clip, vae, latent, base_prompt, negative_prompt, prompt_list,
+    def generate(self, model, clip, vae, latent, upscale_model, base_prompt, negative_prompt, prompt_list,
                  seed, steps, cfg, enable_upscale, save_prefix,
-                 upscale_model=None, scale_factor=0.7, upscale_steps=15, 
+                 downscale_ratio=0.7, upscale_steps=15, 
                  upscale_cfg=5.0, upscale_denoise=0.5, size_alignment="64",
                  lut_name="None", lut_strength=0.3, enable_preview=True, unique_id=None):
         
@@ -412,7 +412,7 @@ class MultiPromptGenerator:
                 upscaled = self.upscale_with_model(upscale_model, image)
                 
                 # 64배수로 리사이즈
-                resized = self.resize_with_alignment(upscaled, scale_factor, size_alignment)
+                resized = self.resize_with_alignment(upscaled, downscale_ratio, size_alignment)
                 
                 # VAE 인코딩 → 2차 샘플링 → 디코딩
                 latent_up = self.encode_vae(vae, resized)

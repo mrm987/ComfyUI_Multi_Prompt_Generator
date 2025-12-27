@@ -62,7 +62,7 @@ crying, tears
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| scale_factor | FLOAT | 0.7 | Downscale ratio after upscale |
+| downscale_ratio | FLOAT | 0.7 | Downscale ratio after upscale |
 | upscale_steps | INT | 15 | 2nd pass steps |
 | upscale_cfg | FLOAT | 5.0 | 2nd pass CFG |
 | upscale_denoise | FLOAT | 0.5 | 2nd pass denoise |
@@ -161,7 +161,7 @@ crying, tears
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| scale_factor | FLOAT | 0.7 | 업스케일 후 다운스케일 비율 |
+| downscale_ratio | FLOAT | 0.7 | 업스케일 후 다운스케일 비율 |
 | upscale_steps | INT | 15 | 2차 샘플링 스텝 |
 | upscale_cfg | FLOAT | 5.0 | 2차 CFG |
 | upscale_denoise | FLOAT | 0.5 | 2차 디노이즈 |
