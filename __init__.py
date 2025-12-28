@@ -626,6 +626,8 @@ class NAIMultiPromptGenerator:
     def call_nai_api(self, prompt, negative_prompt, width, height, seed, steps, cfg, sampler, scheduler, smea, nai_model, variety, decrisper, cfg_rescale, uncond_scale):
         """NAI API 호출"""
         import requests
+        from requests.adapters import HTTPAdapter
+        from urllib3.util.retry import Retry
         import zipfile
         import io
         
@@ -638,36 +640,77 @@ class NAIMultiPromptGenerator:
             "Content-Type": "application/json",
         }
         
-        # SMEA 설정
-        sm = smea in ["SMEA", "SMEA+DYN"]
-        sm_dyn = smea == "SMEA+DYN"
+        # SMEA 설정 (ddim에서는 비활성화)
+        sm = (smea in ["SMEA", "SMEA+DYN"]) and sampler != "ddim"
+        sm_dyn = (smea == "SMEA+DYN") and sampler != "ddim"
+        
+        # ddim → ddim_v3 (v2 모델 제외)
+        actual_sampler = sampler
+        if sampler == "ddim" and "nai-diffusion-2" not in nai_model:
+            actual_sampler = "ddim_v3"
+        
+        params = {
+            "params_version": 1,
+            "width": width,
+            "height": height,
+            "scale": cfg,
+            "sampler": actual_sampler,
+            "steps": steps,
+            "seed": seed,
+            "n_samples": 1,
+            "ucPreset": 3,
+            "qualityToggle": False,
+            "sm": sm,
+            "sm_dyn": sm_dyn,
+            "dynamic_thresholding": decrisper,
+            "controlnet_strength": 1.0,
+            "legacy": False,
+            "add_original_image": False,
+            "cfg_rescale": cfg_rescale,
+            "noise_schedule": scheduler,
+            "legacy_v3_extend": False,
+            "uncond_scale": uncond_scale,
+            "negative_prompt": negative_prompt,
+            "prompt": prompt,
+            "reference_image_multiple": [],
+            "reference_information_extracted_multiple": [],
+            "reference_strength_multiple": [],
+            "extra_noise_seed": seed,
+            "v4_prompt": {
+                "use_coords": False,
+                "use_order": False,
+                "caption": {"base_caption": prompt, "char_captions": []}
+            },
+            "v4_negative_prompt": {
+                "use_coords": False,
+                "use_order": False,
+                "caption": {"base_caption": negative_prompt, "char_captions": []}
+            }
+        }
+        
+        # k_euler_ancestral + non-native scheduler
+        if sampler == "k_euler_ancestral" and scheduler != "native":
+            params["deliberate_euler_ancestral_bug"] = False
+            params["prefer_brownian"] = True
+        
+        # variety → skip_cfg_above_sigma 계산
+        if variety:
+            # NAI 공식: skip_cfg_above_sigma 계산
+            params["skip_cfg_above_sigma"] = self._calculate_skip_cfg_above_sigma(width, height)
         
         payload = {
             "input": prompt,
             "model": nai_model,
             "action": "generate",
-            "parameters": {
-                "width": width,
-                "height": height,
-                "scale": cfg,
-                "sampler": sampler,
-                "steps": steps,
-                "seed": seed,
-                "n_samples": 1,
-                "ucPreset": 0,
-                "qualityToggle": True,
-                "sm": sm,
-                "sm_dyn": sm_dyn,
-                "noise_schedule": scheduler,
-                "negative_prompt": negative_prompt,
-                "cfg_rescale": cfg_rescale,
-                "uncond_scale": uncond_scale,
-                "variety_plus": variety,
-                "decrisper": decrisper,
-            }
+            "parameters": params
         }
         
-        response = requests.post(self.api_url, headers=headers, json=payload, timeout=120)
+        # Retry 로직
+        retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"])
+        session = requests.Session()
+        session.mount("https://", HTTPAdapter(max_retries=retries))
+        
+        response = session.post(self.api_url, headers=headers, json=payload, timeout=120)
         
         if response.status_code != 200:
             raise ValueError(f"NAI API error: {response.status_code} - {response.text}")
@@ -683,6 +726,14 @@ class NAIMultiPromptGenerator:
                     return torch.from_numpy(img_np).unsqueeze(0)
         
         raise ValueError("No image found in NAI API response")
+    
+    def _calculate_skip_cfg_above_sigma(self, width, height):
+        """variety용 skip_cfg_above_sigma 계산 (NAI 공식)"""
+        # 기본 해상도 기준 스케일링
+        base_res = 1024 * 1024
+        current_res = width * height
+        scale = (current_res / base_res) ** 0.5
+        return 19.0 * scale
 
     def save_image(self, image, prefix, filename, counter, prompt=None, extra_pnginfo=None):
         import json
