@@ -1,4 +1,7 @@
 import os
+import sys
+import subprocess
+import importlib
 import glob
 import torch
 import numpy as np
@@ -12,6 +15,21 @@ import comfy.samplers
 import comfy.model_management
 
 from server import PromptServer
+
+
+def ensure_package(package, install_package_name=None):
+    try:
+        importlib.import_module(package)
+    except ImportError:
+        print(f"[MultiPrompt] Package {package} not found. Installing...")
+        if "python_embeded" in sys.executable or "python_embedded" in sys.executable:
+            pip_install = [sys.executable, "-s", "-m", "pip", "install"]
+        else:
+            pip_install = [sys.executable, "-m", "pip", "install"]
+        subprocess.check_call(pip_install + [install_package_name or package])
+
+ensure_package("dotenv", "python-dotenv")
+ensure_package("requests")
 
 
 def get_lut_files():
@@ -533,10 +551,306 @@ class MultiPromptGenerator:
         return max_counter + 1
 
 
+def load_nai_token():
+    """ComfyUI 루트의 .env에서 NAI_ACCESS_TOKEN 로드"""
+    from dotenv import dotenv_values
+    
+    # ComfyUI 루트 경로들
+    possible_paths = [
+        os.path.join(folder_paths.base_path, ".env") if hasattr(folder_paths, 'base_path') else None,
+        os.path.join(os.getcwd(), ".env"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), ".env"),
+    ]
+    
+    for env_path in possible_paths:
+        if env_path and os.path.exists(env_path):
+            env = dotenv_values(env_path)
+            if "NAI_ACCESS_TOKEN" in env:
+                return env["NAI_ACCESS_TOKEN"]
+    
+    # 환경변수에서도 시도
+    return os.environ.get("NAI_ACCESS_TOKEN", None)
+
+
+class NAIMultiPromptGenerator:
+    """
+    NovelAI API를 사용하여 다중 프롬프트 이미지 생성 + 업스케일 + LUT
+    """
+    
+    def __init__(self):
+        self.output_dir = folder_paths.get_output_directory()
+        self.api_url = "https://image.novelai.net/ai/generate-image"
+    
+    @classmethod
+    def INPUT_TYPES(s):
+        return {
+            "required": {
+                "base_prompt": ("STRING", {"multiline": True, "default": "1girl, solo, best quality, amazing quality, very aesthetic, absurdres,"}),
+                "negative_prompt": ("STRING", {"multiline": True, "default": "lowres, bad quality,"}),
+                "prompt_list": ("STRING", {"multiline": True, "default": "# Blank line = new prompt\n# 빈 줄 = 새 프롬프트\n\nsmile, happy\n\nangry, furrowed brow\n\nsad, crying"}),
+                "width": ("INT", {"default": 832, "min": 64, "max": 2048, "step": 64}),
+                "height": ("INT", {"default": 1216, "min": 64, "max": 2048, "step": 64}),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "steps": ("INT", {"default": 28, "min": 1, "max": 50}),
+                "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 20.0, "step": 0.1}),
+                "sampler": (["k_euler", "k_euler_ancestral", "k_dpmpp_2s_ancestral", "k_dpmpp_2m", "k_dpmpp_sde", "ddim"],),
+                "scheduler": (["native", "karras", "exponential", "polyexponential"],),
+                "smea": (["none", "SMEA", "SMEA+DYN"],),
+                "nai_model": (["nai-diffusion-4-5-full", "nai-diffusion-4-curated-preview", "nai-diffusion-3"],),
+                "save_prefix": ("STRING", {"default": "NAI_MultiPrompt"}),
+            },
+            "optional": {
+                "skip_indices": ("STRING", {"default": "", "placeholder": "e.g. 3,4,7"}),
+                "variety": ("BOOLEAN", {"default": False}),
+                "decrisper": ("BOOLEAN", {"default": False}),
+                "cfg_rescale": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "uncond_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.5, "step": 0.01}),
+                "lut_name": (get_lut_files(),),
+                "lut_strength": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.01}),
+                "enable_preview": ("BOOLEAN", {"default": True}),
+            },
+            "hidden": {
+                "unique_id": "UNIQUE_ID",
+                "prompt": "PROMPT",
+                "extra_pnginfo": "EXTRA_PNGINFO",
+            }
+        }
+    
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    FUNCTION = "generate"
+    CATEGORY = "image/generation"
+    OUTPUT_NODE = True
+
+    def call_nai_api(self, prompt, negative_prompt, width, height, seed, steps, cfg, sampler, scheduler, smea, nai_model, variety, decrisper, cfg_rescale, uncond_scale):
+        """NAI API 호출"""
+        import requests
+        import zipfile
+        import io
+        
+        token = load_nai_token()
+        if not token:
+            raise ValueError("NAI_ACCESS_TOKEN not found. Please set it in ComfyUI/.env file")
+        
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        
+        # SMEA 설정
+        sm = smea in ["SMEA", "SMEA+DYN"]
+        sm_dyn = smea == "SMEA+DYN"
+        
+        payload = {
+            "input": prompt,
+            "model": nai_model,
+            "action": "generate",
+            "parameters": {
+                "width": width,
+                "height": height,
+                "scale": cfg,
+                "sampler": sampler,
+                "steps": steps,
+                "seed": seed,
+                "n_samples": 1,
+                "ucPreset": 0,
+                "qualityToggle": True,
+                "sm": sm,
+                "sm_dyn": sm_dyn,
+                "noise_schedule": scheduler,
+                "negative_prompt": negative_prompt,
+                "cfg_rescale": cfg_rescale,
+                "uncond_scale": uncond_scale,
+                "variety_plus": variety,
+                "decrisper": decrisper,
+            }
+        }
+        
+        response = requests.post(self.api_url, headers=headers, json=payload, timeout=120)
+        
+        if response.status_code != 200:
+            raise ValueError(f"NAI API error: {response.status_code} - {response.text}")
+        
+        # ZIP에서 이미지 추출
+        with zipfile.ZipFile(io.BytesIO(response.content)) as z:
+            for name in z.namelist():
+                if name.endswith('.png'):
+                    img_data = z.read(name)
+                    pil_img = Image.open(io.BytesIO(img_data))
+                    # RGB 변환 후 tensor로
+                    img_np = np.array(pil_img.convert("RGB")).astype(np.float32) / 255.0
+                    return torch.from_numpy(img_np).unsqueeze(0)
+        
+        raise ValueError("No image found in NAI API response")
+
+    def save_image(self, image, prefix, filename, counter, prompt=None, extra_pnginfo=None):
+        import json
+        from PIL.PngImagePlugin import PngInfo
+        
+        full_output_folder = os.path.join(self.output_dir, prefix)
+        os.makedirs(full_output_folder, exist_ok=True)
+        
+        file = f"{filename}_{counter:05d}.png"
+        filepath = os.path.join(full_output_folder, file)
+        
+        img = image[0].cpu().numpy()
+        img = (img * 255).astype(np.uint8)
+        pil_img = Image.fromarray(img)
+        
+        metadata = PngInfo()
+        if prompt is not None:
+            metadata.add_text("prompt", json.dumps(prompt))
+        if extra_pnginfo is not None:
+            for key, value in extra_pnginfo.items():
+                metadata.add_text(key, json.dumps(value))
+        
+        pil_img.save(filepath, pnginfo=metadata, compress_level=4)
+        print(f"[NAI MultiPrompt] Saved: {filepath}")
+        return filepath
+
+    def send_preview(self, image, unique_id, idx, stage=""):
+        import time
+        temp_dir = folder_paths.get_temp_directory()
+        timestamp = int(time.time() * 1000)
+        preview_filename = f"nai_multiprompt_preview_{unique_id}_{idx}_{stage}_{timestamp}.png"
+        preview_path = os.path.join(temp_dir, preview_filename)
+        
+        img = image[0].cpu().numpy()
+        img = (img * 255).astype(np.uint8)
+        pil_img = Image.fromarray(img)
+        pil_img.save(preview_path, compress_level=1)
+        
+        PromptServer.instance.send_sync("executed", {
+            "node": unique_id,
+            "output": {
+                "images": [{
+                    "filename": preview_filename,
+                    "subfolder": "",
+                    "type": "temp"
+                }]
+            }
+        })
+
+    def generate(self, base_prompt, negative_prompt, prompt_list,
+                 width, height, seed, steps, cfg, sampler, scheduler, smea, nai_model, save_prefix,
+                 skip_indices="", variety=False, decrisper=False,
+                 cfg_rescale=0.0, uncond_scale=1.0,
+                 lut_name="None", lut_strength=0.3, enable_preview=True,
+                 unique_id=None, prompt=None, extra_pnginfo=None):
+        
+        # prompt_list 파싱
+        blocks = prompt_list.strip().split("\n\n")
+        lines = []
+        for block in blocks:
+            block_lines = [line.strip() for line in block.strip().split("\n") if line.strip()]
+            if not block_lines:
+                continue
+            
+            first_content = None
+            for line in block_lines:
+                if not line.startswith("#"):
+                    first_content = line
+                    break
+            
+            if first_content and first_content.startswith("-"):
+                continue
+            
+            merged = " ".join(
+                line.strip() for line in block_lines 
+                if not line.startswith("#")
+            )
+            if merged:
+                lines.append(merged)
+        
+        # skip_indices 파싱
+        skip_set = set()
+        if skip_indices.strip():
+            for part in skip_indices.split(","):
+                part = part.strip()
+                if part.isdigit():
+                    skip_set.add(int(part))
+        
+        if not lines:
+            raise ValueError("prompt_list가 비어있습니다.")
+        
+        # LUT 로드
+        lut_data = None
+        lut_size = 0
+        if lut_name != "None":
+            lut_path = find_lut_file(lut_name)
+            if lut_path:
+                lut_data, lut_size = parse_cube_lut(lut_path)
+                print(f"[NAI MultiPrompt] LUT loaded: {lut_name}")
+        
+        all_images = []
+        counter = self._get_next_counter(save_prefix)
+        
+        for idx, line in enumerate(lines):
+            if (idx + 1) in skip_set:
+                print(f"[NAI MultiPrompt] Skipping {idx + 1}/{len(lines)}: {line[:40]}...")
+                continue
+            
+            print(f"[NAI MultiPrompt] Processing {idx + 1}/{len(lines)}: {line[:40]}...")
+            
+            first_tag = line.split(",")[0].strip().replace(" ", "_")
+            filename = f"{idx + 1:02d}_{first_tag}"
+            
+            full_prompt = f"{base_prompt} {line}"
+            
+            # NAI API 호출
+            current_seed = seed if seed != 0 else np.random.randint(0, 2**32)
+            image = self.call_nai_api(
+                full_prompt, negative_prompt, width, height,
+                current_seed, steps, cfg, sampler, scheduler, smea,
+                nai_model, variety, decrisper, cfg_rescale, uncond_scale
+            )
+            
+            # 프리뷰
+            if enable_preview and unique_id is not None:
+                self.send_preview(image, unique_id, idx, "nai")
+            
+            # LUT 적용
+            if lut_data is not None and lut_strength > 0:
+                image = apply_lut(image, lut_data, lut_size, lut_strength)
+                if enable_preview and unique_id is not None:
+                    self.send_preview(image, unique_id, idx, "final")
+            
+            # 저장
+            self.save_image(image, save_prefix, filename, counter, prompt, extra_pnginfo)
+            all_images.append(image)
+        
+        print(f"[NAI MultiPrompt] Complete! Generated {len(all_images)} images.")
+        return {"ui": {"images": []}, "result": (all_images,)}
+
+    def _get_next_counter(self, prefix):
+        full_output_folder = os.path.join(self.output_dir, prefix)
+        
+        if not os.path.exists(full_output_folder):
+            return 1
+        
+        existing_files = os.listdir(full_output_folder)
+        if not existing_files:
+            return 1
+        
+        max_counter = 0
+        for f in existing_files:
+            if f.endswith(".png"):
+                try:
+                    counter_str = f.rsplit("_", 1)[-1].replace(".png", "")
+                    counter_val = int(counter_str)
+                    max_counter = max(max_counter, counter_val)
+                except:
+                    pass
+        
+        return max_counter + 1
+
+
 NODE_CLASS_MAPPINGS = {
-    "MultiPromptGenerator": MultiPromptGenerator
+    "MultiPromptGenerator": MultiPromptGenerator,
+    "NAIMultiPromptGenerator": NAIMultiPromptGenerator,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "MultiPromptGenerator": "Multi Prompt Generator"
+    "MultiPromptGenerator": "Multi Prompt Generator",
+    "NAIMultiPromptGenerator": "NAI Multi Prompt Generator",
 }
