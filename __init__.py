@@ -209,6 +209,7 @@ class MultiPromptGenerator:
                 "negative_prompt": ("STRING", {"multiline": True, "default": "lowres, bad quality,"}),
                 "prompt_list": ("STRING", {"multiline": True, "default": "# Blank line = new prompt\n# 빈 줄 = 새 프롬프트\n# Use skip_indices to skip (e.g. 3,4,7)\n\nsmile, happy,\nbright eyes\n\nangry, furrowed brow\n\nsad, crying, tears"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "random_seed_per_image": ("BOOLEAN", {"default": False, "tooltip": "Use different random seed for each image"}),
                 "steps": ("INT", {"default": 30, "min": 1, "max": 200}),
                 "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 30.0, "step": 0.1}),
                 "sampler_name": (comfy.samplers.KSampler.SAMPLERS,),
@@ -404,7 +405,7 @@ class MultiPromptGenerator:
         })
 
     def generate(self, model, clip, vae, latent, upscale_model, base_prompt, negative_prompt, prompt_list,
-                 seed, steps, cfg, sampler_name, scheduler, enable_upscale, save_prefix,
+                 seed, random_seed_per_image, steps, cfg, sampler_name, scheduler, enable_upscale, save_prefix,
                  skip_indices="", downscale_ratio=0.7, upscale_steps=15, 
                  upscale_cfg=5.0, upscale_denoise=0.5, size_alignment="none",
                  lut_name="None", lut_strength=0.3, enable_preview=True, 
@@ -444,8 +445,9 @@ class MultiPromptGenerator:
                 if part.isdigit():
                     skip_set.add(int(part))
         
+        # prompt_list 비어있으면 base_prompt만으로 1장 생성
         if not lines:
-            raise ValueError("prompt_list가 비어있습니다.")
+            lines = [""]
         
         # LUT 로드
         lut_data = None
@@ -474,22 +476,28 @@ class MultiPromptGenerator:
                 print(f"[MultiPrompt] Skipping {idx + 1}/{len(lines)}: {line[:40]}...")
                 continue
             
-            print(f"[MultiPrompt] Processing {idx + 1}/{len(lines)}: {line[:40]}...")
-            
             # 파일명: 순번 + 첫 태그
-            first_tag = line.split(",")[0].strip().replace(" ", "_")
+            first_tag = line.split(",")[0].strip().replace(" ", "_") if line else "base"
             filename = f"{idx + 1:02d}_{first_tag}"
             
             # 프롬프트 결합
-            full_prompt = f"{base_prompt}, {line}"
+            full_prompt = f"{base_prompt}, {line}".strip().rstrip(",")
             positive_cond = self.encode_prompt(clip, full_prompt)
+            
+            # 시드 처리: random_seed_per_image에 따라 랜덤 시드 생성
+            if random_seed_per_image:
+                current_seed = np.random.randint(0, 2**31 - 1)
+            else:
+                current_seed = seed if seed != 0 else np.random.randint(0, 2**31 - 1)
+            
+            print(f"[MultiPrompt] Processing {idx + 1}/{len(lines)}: {line[:40] if line else '(base prompt only)'}... (seed: {current_seed})")
             
             # latent 복사
             latent_samples = latent["samples"].clone()
             
             # 1단계: 기본 샘플링
             samples = self.do_sample(
-                model, seed, steps, cfg, sampler_name, scheduler,
+                model, current_seed, steps, cfg, sampler_name, scheduler,
                 positive_cond, negative_cond,
                 latent_samples, denoise=1.0
             )
@@ -511,7 +519,7 @@ class MultiPromptGenerator:
                 latent_up = self.encode_vae(vae, resized)
                 
                 samples_up = self.do_sample(
-                    model, seed, upscale_steps, upscale_cfg, sampler_name, scheduler,
+                    model, current_seed, upscale_steps, upscale_cfg, sampler_name, scheduler,
                     positive_cond, negative_cond,
                     latent_up, denoise=upscale_denoise
                 )
@@ -661,6 +669,7 @@ class NAIMultiPromptGenerator:
                 "width": ("INT", {"default": 832, "min": 64, "max": 2048, "step": 64}),
                 "height": ("INT", {"default": 1216, "min": 64, "max": 2048, "step": 64}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff}),
+                "random_seed_per_image": ("BOOLEAN", {"default": False, "tooltip": "Use different random seed for each image"}),
                 "steps": ("INT", {"default": 28, "min": 1, "max": 50}),
                 "cfg": ("FLOAT", {"default": 5.0, "min": 0.0, "max": 20.0, "step": 0.1}),
                 "sampler": (["k_euler", "k_euler_ancestral", "k_dpmpp_2s_ancestral", "k_dpmpp_2m", "k_dpmpp_sde", "ddim"],),
@@ -722,6 +731,30 @@ class NAIMultiPromptGenerator:
         if sampler == "ddim" and "nai-diffusion-2" not in nai_model:
             actual_sampler = "ddim_v3"
         
+        # 멀티 캐릭터 프롬프트 파싱 (| 구분자)
+        prompt_parts = [p.strip() for p in prompt.split("|")]
+        base_caption = prompt_parts[0]
+        char_captions = []
+        if len(prompt_parts) > 1:
+            for char_prompt in prompt_parts[1:]:
+                if char_prompt:  # 빈 문자열 제외
+                    char_captions.append({
+                        "char_caption": char_prompt,
+                        "centers": []  # AI's Choice (위치 자동)
+                    })
+        
+        # 네거티브도 동일하게 파싱 (캐릭터별 네거티브 지원)
+        neg_parts = [p.strip() for p in negative_prompt.split("|")]
+        neg_base_caption = neg_parts[0]
+        neg_char_captions = []
+        if len(neg_parts) > 1:
+            for i, neg_char in enumerate(neg_parts[1:]):
+                if neg_char:
+                    neg_char_captions.append({
+                        "char_caption": neg_char,
+                        "centers": []
+                    })
+        
         params = {
             "params_version": 1,
             "width": width,
@@ -751,13 +784,13 @@ class NAIMultiPromptGenerator:
             "extra_noise_seed": seed,
             "v4_prompt": {
                 "use_coords": False,
-                "use_order": False,
-                "caption": {"base_caption": prompt, "char_captions": []}
+                "use_order": True if char_captions else False,
+                "caption": {"base_caption": base_caption, "char_captions": char_captions}
             },
             "v4_negative_prompt": {
                 "use_coords": False,
-                "use_order": False,
-                "caption": {"base_caption": negative_prompt, "char_captions": []}
+                "use_order": True if neg_char_captions else False,
+                "caption": {"base_caption": neg_base_caption, "char_captions": neg_char_captions}
             }
         }
         
@@ -766,14 +799,14 @@ class NAIMultiPromptGenerator:
             _, h_raw, w_raw, _ = reference_image.shape
             canvas_w, canvas_h = _choose_cr_canvas(w_raw, h_raw)
             padded = pad_image_to_canvas(reference_image, (canvas_w, canvas_h))
-            base_caption = "character&style" if char_ref_style_aware else "character"
+            base_caption_ref = "character&style" if char_ref_style_aware else "character"
             
             params["director_reference_images"] = [image_to_base64(padded)]
             params["director_reference_descriptions"] = [{
                 "use_coords": False, 
                 "use_order": False, 
                 "legacy_uc": False, 
-                "caption": {"base_caption": base_caption, "char_captions": []}
+                "caption": {"base_caption": base_caption_ref, "char_captions": []}
             }]
             params["director_reference_strength_values"] = [1.0]
             params["director_reference_secondary_strength_values"] = [1.0 - char_ref_fidelity]
@@ -826,7 +859,7 @@ class NAIMultiPromptGenerator:
         scale = (current_res / base_res) ** 0.5
         return 19.0 * scale
 
-    def save_image(self, image, prefix, filename, counter, prompt=None, extra_pnginfo=None):
+    def save_image(self, image, prefix, filename, counter, prompt=None, extra_pnginfo=None, seed=None, full_prompt=None):
         import json
         from PIL.PngImagePlugin import PngInfo
         
@@ -846,6 +879,11 @@ class NAIMultiPromptGenerator:
         if extra_pnginfo is not None:
             for key, value in extra_pnginfo.items():
                 metadata.add_text(key, json.dumps(value))
+        # NAI 생성 정보 추가
+        if seed is not None:
+            metadata.add_text("nai_seed", str(seed))
+        if full_prompt is not None:
+            metadata.add_text("nai_prompt", full_prompt)
         
         pil_img.save(filepath, pnginfo=metadata, compress_level=4)
         print(f"[NAI MultiPrompt] Saved: {filepath}")
@@ -875,7 +913,7 @@ class NAIMultiPromptGenerator:
         })
 
     def generate(self, base_prompt, negative_prompt, prompt_list,
-                 width, height, seed, steps, cfg, sampler, scheduler, smea, nai_model, save_prefix,
+                 width, height, seed, random_seed_per_image, steps, cfg, sampler, scheduler, smea, nai_model, save_prefix,
                  skip_indices="", variety=False, decrisper=False, free_only=True,
                  cfg_rescale=0.0, uncond_scale=1.0,
                  reference_image=None, char_ref_style_aware=True, char_ref_fidelity=1.0,
@@ -928,8 +966,9 @@ class NAIMultiPromptGenerator:
                 if part.isdigit():
                     skip_set.add(int(part))
         
+        # prompt_list 비어있으면 base_prompt만으로 1장 생성
         if not lines:
-            raise ValueError("prompt_list가 비어있습니다.")
+            lines = [""]
         
         # LUT 로드
         lut_data = None
@@ -954,15 +993,20 @@ class NAIMultiPromptGenerator:
                 print(f"[NAI MultiPrompt] Skipping {idx + 1}/{len(lines)}: {line[:40]}...")
                 continue
             
-            print(f"[NAI MultiPrompt] Processing {idx + 1}/{len(lines)}: {line[:40]}...")
-            
-            first_tag = line.split(",")[0].strip().replace(" ", "_")
+            first_tag = line.split(",")[0].strip().replace(" ", "_") if line else "base"
             filename = f"{idx + 1:02d}_{first_tag}"
             
-            full_prompt = f"{base_prompt} {line}"
+            full_prompt = f"{base_prompt} {line}".strip()
             
             # NAI API 호출
-            current_seed = seed if seed != 0 else np.random.randint(0, 2**31 - 1)
+            # random_seed_per_image: 각 이미지마다 다른 랜덤 시드
+            if random_seed_per_image:
+                current_seed = np.random.randint(0, 2**31 - 1)
+            else:
+                current_seed = seed if seed != 0 else np.random.randint(0, 2**31 - 1)
+            
+            print(f"[NAI MultiPrompt] Processing {idx + 1}/{len(lines)}: {line[:40] if line else '(base prompt only)'}... (seed: {current_seed})")
+            
             image = self.call_nai_api(
                 full_prompt, negative_prompt, width, height,
                 current_seed, steps, cfg, sampler, scheduler, smea,
@@ -981,7 +1025,7 @@ class NAIMultiPromptGenerator:
                     self.send_preview(image, unique_id, idx, "final")
             
             # 저장
-            self.save_image(image, save_prefix, filename, counter, prompt, extra_pnginfo)
+            self.save_image(image, save_prefix, filename, counter, prompt, extra_pnginfo, current_seed, full_prompt)
             all_images.append(image)
         
         print(f"[NAI MultiPrompt] Complete! Generated {len(all_images)} images.")

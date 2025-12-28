@@ -80,6 +80,7 @@ sad, downcast eyes, frown
 | negative_prompt | STRING | Negative prompt |
 | prompt_list | STRING | Prompt list (line-separated) |
 | seed | INT | Seed |
+| random_seed_per_image | BOOL | Use different random seed for each image |
 | steps | INT | Sampling steps (default: 30) |
 | cfg | FLOAT | CFG scale (default: 5.0) |
 | sampler_name | COMBO | Sampler (euler_ancestral, etc.) |
@@ -150,12 +151,13 @@ For each prompt:
 | prompt_list | STRING | | Prompt list (line-separated) |
 | width | INT | 832 | Image width |
 | height | INT | 1216 | Image height |
+| seed | INT | 0 | Seed (0 = random) |
+| random_seed_per_image | BOOL | False | Use different random seed for each image |
 | steps | INT | 28 | Sampling steps |
 | cfg | FLOAT | 5.0 | CFG scale |
 | sampler | COMBO | k_euler | Sampler |
 | scheduler | COMBO | native | Scheduler |
 | smea | COMBO | none | SMEA mode (none/SMEA/SMEA+DYN) |
-| seed | INT | 0 | Seed (0 = random) |
 | variety | BOOL | False | Enable variety (diverse compositions) |
 | decrisper | BOOL | False | Dynamic thresholding (for high CFG) |
 | free_only | BOOL | True | Force Opus free conditions |
@@ -182,6 +184,17 @@ For each prompt:
 **SMEA:** 
 - `none` for ≤1MP
 - `SMEA` or `SMEA+DYN` for higher resolutions
+
+### Multi-Character Prompting
+
+Use `|` to separate base prompt and character prompts:
+```
+2girls, scene, background | 1girl, blonde hair, smile | 1girl, black hair, angry
+```
+- First part = scene/style (base_caption)
+- Following parts = each character (char_captions)
+- Up to 6 characters supported
+- Negative prompt also supports `|` for per-character negatives
 
 ---
 
@@ -261,6 +274,7 @@ sad, downcast eyes, frown
 | negative_prompt | STRING | 네거티브 프롬프트 |
 | prompt_list | STRING | 프롬프트 리스트 (줄바꿈 구분) |
 | seed | INT | 시드 |
+| random_seed_per_image | BOOL | 각 이미지마다 다른 랜덤 시드 사용 |
 | steps | INT | 샘플링 스텝 (기본: 30) |
 | cfg | FLOAT | CFG 스케일 (기본: 5.0) |
 | sampler_name | COMBO | 샘플러 (euler_ancestral 등) |
@@ -331,12 +345,13 @@ output/[save_prefix]/03_sad_00001.png
 | prompt_list | STRING | | 프롬프트 리스트 (줄바꿈 구분) |
 | width | INT | 832 | 이미지 너비 |
 | height | INT | 1216 | 이미지 높이 |
+| seed | INT | 0 | 시드 (0 = 랜덤) |
+| random_seed_per_image | BOOL | False | 각 이미지마다 다른 랜덤 시드 사용 |
 | steps | INT | 28 | 샘플링 스텝 |
 | cfg | FLOAT | 5.0 | CFG 스케일 |
 | sampler | COMBO | k_euler | 샘플러 |
 | scheduler | COMBO | native | 스케줄러 |
 | smea | COMBO | none | SMEA 모드 (none/SMEA/SMEA+DYN) |
-| seed | INT | 0 | 시드 (0 = 랜덤) |
 | variety | BOOL | False | 다양성 모드 (구도 다양화) |
 | decrisper | BOOL | False | Dynamic Thresholding (고CFG용) |
 | free_only | BOOL | True | Opus 무료 조건 강제 |
@@ -363,6 +378,17 @@ output/[save_prefix]/03_sad_00001.png
 **SMEA:** 
 - 1MP 이하는 `none`
 - 고해상도는 `SMEA` 또는 `SMEA+DYN`
+
+### 멀티 캐릭터 프롬프팅
+
+`|`로 베이스 프롬프트와 캐릭터 프롬프트 구분:
+```
+2girls, 장면, 배경 | 1girl, 금발, 미소 | 1girl, 검은 머리, 화남
+```
+- 첫 번째 = 장면/스타일 (base_caption)
+- 이후 = 각 캐릭터 (char_captions)
+- 최대 6명 지원
+- 네거티브도 `|`로 캐릭터별 지정 가능
 
 ---
 
