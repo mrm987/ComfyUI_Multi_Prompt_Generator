@@ -26,7 +26,28 @@ git clone https://github.com/mrm987/ComfyUI_Multi_Prompt_Generator.git
 ```
 Restart ComfyUI.
 
-### Usage
+### Nodes
+
+### 1. Multi Prompt Generator
+Generate multiple images with local models (SD, SDXL, etc.)
+
+### 2. NAI Multi Prompt Generator  
+Generate multiple images using NovelAI API + local upscale
+
+**Setup for NAI node:**
+1. Create `.env` file in ComfyUI root folder
+2. Add your token: `NAI_ACCESS_TOKEN=your_token_here`
+
+**NAI Node Features:**
+- V4.5 model support with T5 encoder
+- Auto-retry on server errors (429, 500, 502, 503, 504)
+- `free_only` option for Opus subscribers (forces 1MP, 28 steps)
+- Interrupt support (cancel during batch)
+- SMEA/DYN for high-resolution generation
+
+---
+
+## Usage (Multi Prompt Generator)
 
 1. Search node: **"Multi Prompt Generator"**
 2. Connect: Model, CLIP, VAE, Empty Latent, Upscale Model
@@ -114,6 +135,53 @@ For each prompt:
 
 ---
 
+## Usage (NAI Multi Prompt Generator)
+
+1. Search node: **"NAI Multi Prompt Generator"**
+2. Connect: Upscale Model (optional)
+3. Enter prompt list — same format as above
+
+### NAI Inputs
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| base_prompt | STRING | | Base prompt |
+| negative_prompt | STRING | | Negative prompt |
+| prompt_list | STRING | | Prompt list (line-separated) |
+| width | INT | 832 | Image width |
+| height | INT | 1216 | Image height |
+| steps | INT | 28 | Sampling steps |
+| cfg | FLOAT | 5.0 | CFG scale |
+| sampler | COMBO | k_euler | Sampler |
+| scheduler | COMBO | native | Scheduler |
+| smea | COMBO | none | SMEA mode (none/SMEA/SMEA+DYN) |
+| seed | INT | 0 | Seed (0 = random) |
+| variety | BOOL | False | Enable variety (diverse compositions) |
+| decrisper | BOOL | False | Dynamic thresholding (for high CFG) |
+| free_only | BOOL | True | Force Opus free conditions |
+| enable_upscale | BOOL | True | Enable local upscale |
+| save_prefix | STRING | "NAI" | Output folder name |
+
+### NAI Recommended Settings
+
+**Resolution (free_only=True):**
+- Portrait: 832×1216
+- Landscape: 1216×832
+- Square: 1024×1024
+- Must be ≤1MP (1,048,576 pixels)
+
+**Sampler/Scheduler:**
+- `k_euler` + `native` — Stable, recommended
+- `k_euler_ancestral` + `native` — More variety
+
+**CFG:** 4~6 for V4.5 (lower works well)
+
+**SMEA:** 
+- `none` for ≤1MP
+- `SMEA` or `SMEA+DYN` for higher resolutions
+
+---
+
 ## 한국어
 
 프롬프트 리스트를 한 번에 처리해서 여러 이미지를 생성하는 ComfyUI 커스텀 노드.
@@ -136,7 +204,28 @@ git clone https://github.com/mrm987/ComfyUI_Multi_Prompt_Generator.git
 ```
 ComfyUI 재시작.
 
-### 사용법
+### 노드 목록
+
+### 1. Multi Prompt Generator
+로컬 모델(SD, SDXL 등)로 다중 이미지 생성
+
+### 2. NAI Multi Prompt Generator  
+NovelAI API로 이미지 생성 + 로컬 업스케일
+
+**NAI 노드 설정:**
+1. ComfyUI 루트 폴더에 `.env` 파일 생성
+2. 토큰 추가: `NAI_ACCESS_TOKEN=your_token_here`
+
+**NAI 노드 특징:**
+- V4.5 모델 지원 (T5 인코더)
+- 서버 에러 자동 재시도 (429, 500, 502, 503, 504)
+- `free_only` 옵션으로 Opus 무료 조건 강제 (1MP, 28 steps)
+- 인터럽트 지원 (배치 중 취소 가능)
+- 고해상도 생성용 SMEA/DYN
+
+---
+
+## 사용법 (Multi Prompt Generator)
 
 1. 노드 검색: **"Multi Prompt Generator"**
 2. 연결: Model, CLIP, VAE, Empty Latent, Upscale Model
@@ -221,6 +310,53 @@ output/[save_prefix]/03_sad_00001.png
 - **LUT 파일**: `comfyui-propost/LUTs/` 또는 `models/luts/` 폴더의 .cube 파일 자동 인식
 - **프리뷰**: 1차 결과 확인 후 마음에 안 들면 Cancel로 중단 가능
 - **메타데이터**: 워크플로우 정보가 PNG에 저장되어 ComfyUI에 다시 드래그 가능
+
+---
+
+## 사용법 (NAI Multi Prompt Generator)
+
+1. 노드 검색: **"NAI Multi Prompt Generator"**
+2. 연결: Upscale Model (선택)
+3. 프롬프트 리스트 입력 — 위와 동일한 형식
+
+### NAI 입력
+
+| Input | Type | Default | Description |
+|-------|------|---------|-------------|
+| base_prompt | STRING | | 기본 프롬프트 |
+| negative_prompt | STRING | | 네거티브 프롬프트 |
+| prompt_list | STRING | | 프롬프트 리스트 (줄바꿈 구분) |
+| width | INT | 832 | 이미지 너비 |
+| height | INT | 1216 | 이미지 높이 |
+| steps | INT | 28 | 샘플링 스텝 |
+| cfg | FLOAT | 5.0 | CFG 스케일 |
+| sampler | COMBO | k_euler | 샘플러 |
+| scheduler | COMBO | native | 스케줄러 |
+| smea | COMBO | none | SMEA 모드 (none/SMEA/SMEA+DYN) |
+| seed | INT | 0 | 시드 (0 = 랜덤) |
+| variety | BOOL | False | 다양성 모드 (구도 다양화) |
+| decrisper | BOOL | False | Dynamic Thresholding (고CFG용) |
+| free_only | BOOL | True | Opus 무료 조건 강제 |
+| enable_upscale | BOOL | True | 로컬 업스케일 활성화 |
+| save_prefix | STRING | "NAI" | 저장 폴더명 |
+
+### NAI 권장 설정
+
+**해상도 (free_only=True):**
+- 세로: 832×1216
+- 가로: 1216×832
+- 정사각: 1024×1024
+- 반드시 ≤1MP (1,048,576 pixels)
+
+**샘플러/스케줄러:**
+- `k_euler` + `native` — 안정적, 권장
+- `k_euler_ancestral` + `native` — 더 다양한 결과
+
+**CFG:** V4.5는 4~6 권장 (낮아도 잘 나옴)
+
+**SMEA:** 
+- 1MP 이하는 `none`
+- 고해상도는 `SMEA` 또는 `SMEA+DYN`
 
 ---
 
