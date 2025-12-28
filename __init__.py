@@ -798,7 +798,7 @@ class NAIMultiPromptGenerator:
             full_prompt = f"{base_prompt} {line}"
             
             # NAI API 호출
-            current_seed = seed if seed != 0 else np.random.randint(0, 2**32)
+            current_seed = seed if seed != 0 else np.random.randint(0, 2**31 - 1)
             image = self.call_nai_api(
                 full_prompt, negative_prompt, width, height,
                 current_seed, steps, cfg, sampler, scheduler, smea,
