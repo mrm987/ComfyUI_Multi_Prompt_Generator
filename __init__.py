@@ -603,6 +603,7 @@ class NAIMultiPromptGenerator:
                 "skip_indices": ("STRING", {"default": "", "placeholder": "e.g. 3,4,7"}),
                 "variety": ("BOOLEAN", {"default": False}),
                 "decrisper": ("BOOLEAN", {"default": False}),
+                "free_only": ("BOOLEAN", {"default": True}),
                 "cfg_rescale": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "uncond_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.5, "step": 0.01}),
                 "lut_name": (get_lut_files(),),
@@ -733,10 +734,24 @@ class NAIMultiPromptGenerator:
 
     def generate(self, base_prompt, negative_prompt, prompt_list,
                  width, height, seed, steps, cfg, sampler, scheduler, smea, nai_model, save_prefix,
-                 skip_indices="", variety=False, decrisper=False,
+                 skip_indices="", variety=False, decrisper=False, free_only=True,
                  cfg_rescale=0.0, uncond_scale=1.0,
                  lut_name="None", lut_strength=0.3, enable_preview=True,
                  unique_id=None, prompt=None, extra_pnginfo=None):
+        
+        # free_only: Opus 무료 조건 (1MP 이하, 28 steps 이하)
+        if free_only:
+            pixel_limit = 1024 * 1024
+            pixels = width * height
+            if pixels > pixel_limit:
+                # 비율 유지하면서 축소
+                scale = (pixel_limit / pixels) ** 0.5
+                width = int(width * scale) // 64 * 64
+                height = int(height * scale) // 64 * 64
+                print(f"[NAI MultiPrompt] free_only: Resolution adjusted to {width}x{height}")
+            if steps > 28:
+                print(f"[NAI MultiPrompt] free_only: Steps clamped from {steps} to 28")
+                steps = 28
         
         # prompt_list 파싱
         blocks = prompt_list.strip().split("\n\n")
