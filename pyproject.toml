@@ -1,0 +1,9 @@
+[project]
+name = "comfyui-multi-prompt-generator"
+description = "Generate multiple images from prompt list with upscale and LUT support"
+version = "1.0.0"
+license = { text = "MIT" }
+dependencies = ["requests", "python-dotenv"]
+
+[project.urls]
+Repository = "https://github.com/mrm987/ComfyUI_Multi_Prompt_Generator"
