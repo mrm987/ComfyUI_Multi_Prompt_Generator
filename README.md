@@ -159,6 +159,9 @@ For each prompt:
 | variety | BOOL | False | Enable variety (diverse compositions) |
 | decrisper | BOOL | False | Dynamic thresholding (for high CFG) |
 | free_only | BOOL | True | Force Opus free conditions |
+| reference_image | IMAGE | None | Character reference image |
+| char_ref_style_aware | BOOL | True | Copy style along with identity |
+| char_ref_fidelity | FLOAT | 1.0 | How strictly to match the character |
 | enable_upscale | BOOL | True | Enable local upscale |
 | save_prefix | STRING | "NAI" | Output folder name |
 
@@ -337,6 +340,9 @@ output/[save_prefix]/03_sad_00001.png
 | variety | BOOL | False | 다양성 모드 (구도 다양화) |
 | decrisper | BOOL | False | Dynamic Thresholding (고CFG용) |
 | free_only | BOOL | True | Opus 무료 조건 강제 |
+| reference_image | IMAGE | None | 캐릭터 레퍼런스 이미지 |
+| char_ref_style_aware | BOOL | True | 스타일도 함께 복사 |
+| char_ref_fidelity | FLOAT | 1.0 | 캐릭터 일치도 (높을수록 정확) |
 | enable_upscale | BOOL | True | 로컬 업스케일 활성화 |
 | save_prefix | STRING | "NAI" | 저장 폴더명 |
 

@@ -3,6 +3,7 @@ import sys
 import subprocess
 import importlib
 import glob
+import io
 import torch
 import numpy as np
 from PIL import Image
@@ -530,7 +531,22 @@ class MultiPromptGenerator:
         
         print(f"[MultiPrompt] Complete! Generated {len(all_images)} images.")
         
-        # 마지막 프리뷰는 이미 send_preview로 전송됨
+        # 마지막 이미지를 UI에 표시
+        if all_images and enable_preview:
+            last_image = all_images[-1]
+            import time
+            temp_dir = folder_paths.get_temp_directory()
+            timestamp = int(time.time() * 1000)
+            preview_filename = f"multiprompt_final_{timestamp}.png"
+            preview_path = os.path.join(temp_dir, preview_filename)
+            
+            img = last_image[0].cpu().numpy()
+            img = (img * 255).astype(np.uint8)
+            pil_img = Image.fromarray(img)
+            pil_img.save(preview_path, compress_level=1)
+            
+            return {"ui": {"images": [{"filename": preview_filename, "subfolder": "", "type": "temp"}]}, "result": (all_images,)}
+        
         return {"ui": {"images": []}, "result": (all_images,)}
 
     def _get_next_counter(self, prefix):
@@ -578,6 +594,54 @@ def load_nai_token():
     return os.environ.get("NAI_ACCESS_TOKEN", None)
 
 
+# Character Reference 헬퍼 함수들
+ACCEPTED_CR_SIZES = [(1024, 1536), (1536, 1024), (1472, 1472)]
+
+def _choose_cr_canvas(w, h):
+    """캐릭터 레퍼런스용 캔버스 크기 선택 (원본 비율에 가장 가까운 것)"""
+    aspect = w / h
+    best = None
+    best_diff = 9e9
+    for cw, ch in ACCEPTED_CR_SIZES:
+        diff = abs((cw / ch) - aspect)
+        if diff < best_diff:
+            best_diff = diff
+            best = (cw, ch)
+    return best
+
+def pad_image_to_canvas(tensor_image, target_size):
+    """이미지를 캔버스 크기에 맞게 letterbox 패딩"""
+    _, H, W, C = tensor_image.shape
+    tw, th = target_size
+    arr = (tensor_image[0].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+    mode = "RGBA" if (C == 4) else "RGB"
+    pil = Image.fromarray(arr)
+    
+    scale = min(tw / W, th / H)
+    new_w = max(1, int(W * scale))
+    new_h = max(1, int(H * scale))
+    pil_resized = pil.resize((new_w, new_h), Image.LANCZOS)
+    
+    if mode == "RGBA":
+        canvas = Image.new("RGBA", (tw, th), (0, 0, 0, 0))
+    else:
+        canvas = Image.new("RGB", (tw, th), (0, 0, 0))
+    offset = ((tw - new_w) // 2, (th - new_h) // 2)
+    canvas.paste(pil_resized, offset)
+    
+    out = np.array(canvas).astype(np.float32) / 255.0
+    return torch.from_numpy(out)[None,]
+
+def image_to_base64(tensor_image):
+    """텐서 이미지를 base64로 변환"""
+    import base64
+    arr = (tensor_image[0].cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+    pil = Image.fromarray(arr)
+    buffer = io.BytesIO()
+    pil.save(buffer, format="PNG")
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
 class NAIMultiPromptGenerator:
     """
     NovelAI API를 사용하여 다중 프롬프트 이미지 생성 + 업스케일 + LUT
@@ -612,6 +676,9 @@ class NAIMultiPromptGenerator:
                 "free_only": ("BOOLEAN", {"default": True}),
                 "cfg_rescale": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "uncond_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.5, "step": 0.01}),
+                "reference_image": ("IMAGE",),
+                "char_ref_style_aware": ("BOOLEAN", {"default": True, "tooltip": "Copy style along with identity"}),
+                "char_ref_fidelity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "How strictly to match the character"}),
                 "lut_name": (get_lut_files(),),
                 "lut_strength": ("FLOAT", {"default": 0.3, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "enable_preview": ("BOOLEAN", {"default": True}),
@@ -629,7 +696,7 @@ class NAIMultiPromptGenerator:
     CATEGORY = "image/generation"
     OUTPUT_NODE = True
 
-    def call_nai_api(self, prompt, negative_prompt, width, height, seed, steps, cfg, sampler, scheduler, smea, nai_model, variety, decrisper, cfg_rescale, uncond_scale):
+    def call_nai_api(self, prompt, negative_prompt, width, height, seed, steps, cfg, sampler, scheduler, smea, nai_model, variety, decrisper, cfg_rescale, uncond_scale, reference_image=None, char_ref_style_aware=True, char_ref_fidelity=1.0):
         """NAI API 호출"""
         import requests
         from requests.adapters import HTTPAdapter
@@ -693,6 +760,24 @@ class NAIMultiPromptGenerator:
                 "caption": {"base_caption": negative_prompt, "char_captions": []}
             }
         }
+        
+        # Character Reference 처리
+        if reference_image is not None:
+            _, h_raw, w_raw, _ = reference_image.shape
+            canvas_w, canvas_h = _choose_cr_canvas(w_raw, h_raw)
+            padded = pad_image_to_canvas(reference_image, (canvas_w, canvas_h))
+            base_caption = "character&style" if char_ref_style_aware else "character"
+            
+            params["director_reference_images"] = [image_to_base64(padded)]
+            params["director_reference_descriptions"] = [{
+                "use_coords": False, 
+                "use_order": False, 
+                "legacy_uc": False, 
+                "caption": {"base_caption": base_caption, "char_captions": []}
+            }]
+            params["director_reference_strength_values"] = [1.0]
+            params["director_reference_secondary_strength_values"] = [1.0 - char_ref_fidelity]
+            params["director_reference_information_extracted"] = [1.0]
         
         # k_euler_ancestral + non-native scheduler
         if sampler == "k_euler_ancestral" and scheduler != "native":
@@ -793,6 +878,7 @@ class NAIMultiPromptGenerator:
                  width, height, seed, steps, cfg, sampler, scheduler, smea, nai_model, save_prefix,
                  skip_indices="", variety=False, decrisper=False, free_only=True,
                  cfg_rescale=0.0, uncond_scale=1.0,
+                 reference_image=None, char_ref_style_aware=True, char_ref_fidelity=1.0,
                  lut_name="None", lut_strength=0.3, enable_preview=True,
                  unique_id=None, prompt=None, extra_pnginfo=None):
         
@@ -880,7 +966,8 @@ class NAIMultiPromptGenerator:
             image = self.call_nai_api(
                 full_prompt, negative_prompt, width, height,
                 current_seed, steps, cfg, sampler, scheduler, smea,
-                nai_model, variety, decrisper, cfg_rescale, uncond_scale
+                nai_model, variety, decrisper, cfg_rescale, uncond_scale,
+                reference_image, char_ref_style_aware, char_ref_fidelity
             )
             
             # 프리뷰
@@ -898,6 +985,23 @@ class NAIMultiPromptGenerator:
             all_images.append(image)
         
         print(f"[NAI MultiPrompt] Complete! Generated {len(all_images)} images.")
+        
+        # 마지막 이미지를 UI에 표시
+        if all_images and enable_preview:
+            last_image = all_images[-1]
+            import time
+            temp_dir = folder_paths.get_temp_directory()
+            timestamp = int(time.time() * 1000)
+            preview_filename = f"nai_multiprompt_final_{timestamp}.png"
+            preview_path = os.path.join(temp_dir, preview_filename)
+            
+            img = last_image[0].cpu().numpy()
+            img = (img * 255).astype(np.uint8)
+            pil_img = Image.fromarray(img)
+            pil_img.save(preview_path, compress_level=1)
+            
+            return {"ui": {"images": [{"filename": preview_filename, "subfolder": "", "type": "temp"}]}, "result": (all_images,)}
+        
         return {"ui": {"images": []}, "result": (all_images,)}
 
     def _get_next_counter(self, prefix):
