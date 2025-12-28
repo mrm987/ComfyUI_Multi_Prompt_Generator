@@ -732,32 +732,40 @@ class NAIMultiPromptGenerator:
             actual_sampler = "ddim_v3"
         
         # 멀티 캐릭터 프롬프트 파싱 (| 구분자)
-        prompt_parts = [p.strip() for p in prompt.split("|")]
-        base_caption = prompt_parts[0]
+        # 형식: base_prompt | char1_prompt | char2_prompt | ...
         char_captions = []
-        if len(prompt_parts) > 1:
-            for char_prompt in prompt_parts[1:]:
-                if char_prompt:  # 빈 문자열 제외
+        neg_char_captions = []
+        character_prompts = []  # 루트 레벨 characterPrompts용
+        
+        if "|" in prompt:
+            parts = [p.strip() for p in prompt.split("|")]
+            base_caption = parts[0]
+            for char_prompt in parts[1:]:
+                if char_prompt:
+                    # v4_prompt용 char_captions (centers는 배열)
                     char_captions.append({
                         "char_caption": char_prompt,
-                        "centers": []  # AI's Choice (위치 자동)
+                        "centers": [{"x": 0.5, "y": 0.5}]
                     })
-            print(f"[NAI MultiPrompt] Multi-character detected: {len(char_captions)} characters")
-        
-        # 네거티브도 동일하게 파싱 (캐릭터별 네거티브 지원)
-        neg_parts = [p.strip() for p in negative_prompt.split("|")]
-        neg_base_caption = neg_parts[0]
-        neg_char_captions = []
-        if len(neg_parts) > 1:
-            for i, neg_char in enumerate(neg_parts[1:]):
-                if neg_char:
+                    # 루트 레벨 characterPrompts
+                    character_prompts.append({
+                        "prompt": char_prompt,
+                        "uc": "",
+                        "center": {"x": 0.5, "y": 0.5},
+                        "enabled": True
+                    })
+                    # 네거티브용 char_captions (빈 문자열)
                     neg_char_captions.append({
-                        "char_caption": neg_char,
-                        "centers": []
+                        "char_caption": "",
+                        "centers": [{"x": 0.5, "y": 0.5}]
                     })
+        else:
+            base_caption = prompt
+        
+        neg_base_caption = negative_prompt
         
         params = {
-            "params_version": 1,
+            "params_version": 3,
             "width": width,
             "height": height,
             "scale": cfg,
@@ -772,25 +780,26 @@ class NAIMultiPromptGenerator:
             "dynamic_thresholding": decrisper,
             "controlnet_strength": 1.0,
             "legacy": False,
-            "add_original_image": False,
+            "add_original_image": True,
             "cfg_rescale": cfg_rescale,
             "noise_schedule": scheduler,
             "legacy_v3_extend": False,
             "uncond_scale": uncond_scale,
-            "negative_prompt": neg_base_caption,  # 파싱된 베이스만
-            "prompt": base_caption,  # 파싱된 베이스만
+            "negative_prompt": neg_base_caption,
+            "prompt": base_caption,
             "reference_image_multiple": [],
             "reference_information_extracted_multiple": [],
             "reference_strength_multiple": [],
             "extra_noise_seed": seed,
+            "use_coords": False,
+            "characterPrompts": character_prompts,
             "v4_prompt": {
                 "use_coords": False,
-                "use_order": False,
+                "use_order": True,
                 "caption": {"base_caption": base_caption, "char_captions": char_captions}
             },
             "v4_negative_prompt": {
-                "use_coords": False,
-                "use_order": False,
+                "legacy_uc": False,
                 "caption": {"base_caption": neg_base_caption, "char_captions": neg_char_captions}
             }
         }
@@ -830,25 +839,25 @@ class NAIMultiPromptGenerator:
             "parameters": params
         }
         
-        # Retry 로직 (5회 재시도, 대기 시간 증가)
+        # Retry 로직 (3회 재시도)
         retries = Retry(
-            total=5, 
-            backoff_factor=2,  # 2초, 4초, 8초, 16초, 32초
+            total=3, 
+            backoff_factor=1,
             status_forcelist=[429, 500, 502, 503, 504], 
             allowed_methods=["POST"],
-            raise_on_status=False  # 수동 처리
+            raise_on_status=False
         )
         session = requests.Session()
         session.mount("https://", HTTPAdapter(max_retries=retries))
         
         try:
-            response = session.post(self.api_url, headers=headers, json=payload, timeout=180)
+            response = session.post(self.api_url, headers=headers, json=payload, timeout=120)
         except requests.exceptions.RetryError as e:
-            raise ValueError(f"NAI API 서버 오류 (재시도 5회 실패). 잠시 후 다시 시도해주세요. 원인: {e}")
+            raise ValueError(f"NAI API 서버 오류. 잠시 후 다시 시도해주세요.")
         except requests.exceptions.Timeout:
-            raise ValueError("NAI API 타임아웃 (180초 초과). 네트워크 상태를 확인해주세요.")
+            raise ValueError("NAI API 타임아웃. 네트워크 상태를 확인해주세요.")
         except requests.exceptions.ConnectionError as e:
-            raise ValueError(f"NAI API 연결 실패. 네트워크 상태를 확인해주세요. 원인: {e}")
+            raise ValueError(f"NAI API 연결 실패. 네트워크 상태를 확인해주세요.")
         
         if response.status_code != 200:
             error_msg = response.text[:500] if response.text else "Unknown error"
