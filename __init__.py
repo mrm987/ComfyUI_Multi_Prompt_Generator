@@ -461,7 +461,13 @@ class MultiPromptGenerator:
         all_images = []
         counter = self._get_next_counter(save_prefix)
         
+        # 인터럽트 체크용
+        import comfy.model_management as mm
+        
         for idx, line in enumerate(lines):
+            # 중단 체크
+            mm.throw_exception_if_processing_interrupted()
+            
             # skip_indices에 있으면 스킵 (1-based)
             if (idx + 1) in skip_set:
                 print(f"[MultiPrompt] Skipping {idx + 1}/{len(lines)}: {line[:40]}...")
@@ -851,7 +857,13 @@ class NAIMultiPromptGenerator:
         all_images = []
         counter = self._get_next_counter(save_prefix)
         
+        # 인터럽트 체크용
+        import comfy.model_management as mm
+        
         for idx, line in enumerate(lines):
+            # 중단 체크
+            mm.throw_exception_if_processing_interrupted()
+            
             if (idx + 1) in skip_set:
                 print(f"[NAI MultiPrompt] Skipping {idx + 1}/{len(lines)}: {line[:40]}...")
                 continue
