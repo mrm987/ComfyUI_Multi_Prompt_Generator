@@ -742,6 +742,7 @@ class NAIMultiPromptGenerator:
                         "char_caption": char_prompt,
                         "centers": []  # AI's Choice (위치 자동)
                     })
+            print(f"[NAI MultiPrompt] Multi-character detected: {len(char_captions)} characters")
         
         # 네거티브도 동일하게 파싱 (캐릭터별 네거티브 지원)
         neg_parts = [p.strip() for p in negative_prompt.split("|")]
@@ -776,20 +777,20 @@ class NAIMultiPromptGenerator:
             "noise_schedule": scheduler,
             "legacy_v3_extend": False,
             "uncond_scale": uncond_scale,
-            "negative_prompt": negative_prompt,
-            "prompt": prompt,
+            "negative_prompt": neg_base_caption,  # 파싱된 베이스만
+            "prompt": base_caption,  # 파싱된 베이스만
             "reference_image_multiple": [],
             "reference_information_extracted_multiple": [],
             "reference_strength_multiple": [],
             "extra_noise_seed": seed,
             "v4_prompt": {
                 "use_coords": False,
-                "use_order": True if char_captions else False,
+                "use_order": False,
                 "caption": {"base_caption": base_caption, "char_captions": char_captions}
             },
             "v4_negative_prompt": {
                 "use_coords": False,
-                "use_order": True if neg_char_captions else False,
+                "use_order": False,
                 "caption": {"base_caption": neg_base_caption, "char_captions": neg_char_captions}
             }
         }
@@ -829,15 +830,29 @@ class NAIMultiPromptGenerator:
             "parameters": params
         }
         
-        # Retry 로직
-        retries = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=["POST"])
+        # Retry 로직 (5회 재시도, 대기 시간 증가)
+        retries = Retry(
+            total=5, 
+            backoff_factor=2,  # 2초, 4초, 8초, 16초, 32초
+            status_forcelist=[429, 500, 502, 503, 504], 
+            allowed_methods=["POST"],
+            raise_on_status=False  # 수동 처리
+        )
         session = requests.Session()
         session.mount("https://", HTTPAdapter(max_retries=retries))
         
-        response = session.post(self.api_url, headers=headers, json=payload, timeout=120)
+        try:
+            response = session.post(self.api_url, headers=headers, json=payload, timeout=180)
+        except requests.exceptions.RetryError as e:
+            raise ValueError(f"NAI API 서버 오류 (재시도 5회 실패). 잠시 후 다시 시도해주세요. 원인: {e}")
+        except requests.exceptions.Timeout:
+            raise ValueError("NAI API 타임아웃 (180초 초과). 네트워크 상태를 확인해주세요.")
+        except requests.exceptions.ConnectionError as e:
+            raise ValueError(f"NAI API 연결 실패. 네트워크 상태를 확인해주세요. 원인: {e}")
         
         if response.status_code != 200:
-            raise ValueError(f"NAI API error: {response.status_code} - {response.text}")
+            error_msg = response.text[:500] if response.text else "Unknown error"
+            raise ValueError(f"NAI API error: {response.status_code} - {error_msg}")
         
         # ZIP에서 이미지 추출
         with zipfile.ZipFile(io.BytesIO(response.content)) as z:
