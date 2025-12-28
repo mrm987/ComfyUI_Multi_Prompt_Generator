@@ -685,6 +685,8 @@ class NAIMultiPromptGenerator:
                 "free_only": ("BOOLEAN", {"default": True}),
                 "cfg_rescale": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01}),
                 "uncond_scale": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.5, "step": 0.01}),
+                "uc_preset": (["Heavy", "Light", "Human Focus", "None"], {"default": "Heavy", "tooltip": "Undesired Content preset (0=Heavy, 1=Light, 2=Human Focus, 3=None)"}),
+                "quality_tags": ("BOOLEAN", {"default": True, "tooltip": "Add quality tags automatically (like NAI web UI)"}),
                 "reference_image": ("IMAGE",),
                 "char_ref_style_aware": ("BOOLEAN", {"default": True, "tooltip": "Copy style along with identity"}),
                 "char_ref_fidelity": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.01, "tooltip": "How strictly to match the character"}),
@@ -705,7 +707,7 @@ class NAIMultiPromptGenerator:
     CATEGORY = "image/generation"
     OUTPUT_NODE = True
 
-    def call_nai_api(self, prompt, negative_prompt, width, height, seed, steps, cfg, sampler, scheduler, smea, nai_model, variety, decrisper, cfg_rescale, uncond_scale, reference_image=None, char_ref_style_aware=True, char_ref_fidelity=1.0):
+    def call_nai_api(self, prompt, negative_prompt, width, height, seed, steps, cfg, sampler, scheduler, smea, nai_model, variety, decrisper, cfg_rescale, uncond_scale, uc_preset="Heavy", quality_tags=True, reference_image=None, char_ref_style_aware=True, char_ref_fidelity=1.0):
         """NAI API 호출"""
         import requests
         from requests.adapters import HTTPAdapter
@@ -764,6 +766,10 @@ class NAIMultiPromptGenerator:
         
         neg_base_caption = negative_prompt
         
+        # UC Preset 변환 (문자열 → 숫자)
+        uc_preset_map = {"Heavy": 0, "Light": 1, "Human Focus": 2, "None": 3}
+        uc_preset_value = uc_preset_map.get(uc_preset, 0)
+        
         params = {
             "params_version": 3,
             "width": width,
@@ -773,8 +779,8 @@ class NAIMultiPromptGenerator:
             "steps": steps,
             "seed": seed,
             "n_samples": 1,
-            "ucPreset": 3,
-            "qualityToggle": False,
+            "ucPreset": uc_preset_value,
+            "qualityToggle": quality_tags,
             "sm": sm,
             "sm_dyn": sm_dyn,
             "dynamic_thresholding": decrisper,
@@ -939,7 +945,7 @@ class NAIMultiPromptGenerator:
     def generate(self, base_prompt, negative_prompt, prompt_list,
                  width, height, seed, random_seed_per_image, steps, cfg, sampler, scheduler, smea, nai_model, save_prefix,
                  skip_indices="", variety=False, decrisper=False, free_only=True,
-                 cfg_rescale=0.0, uncond_scale=1.0,
+                 cfg_rescale=0.0, uncond_scale=1.0, uc_preset="Heavy", quality_tags=True,
                  reference_image=None, char_ref_style_aware=True, char_ref_fidelity=1.0,
                  lut_name="None", lut_strength=0.3, enable_preview=True,
                  unique_id=None, prompt=None, extra_pnginfo=None):
@@ -1035,6 +1041,7 @@ class NAIMultiPromptGenerator:
                 full_prompt, negative_prompt, width, height,
                 current_seed, steps, cfg, sampler, scheduler, smea,
                 nai_model, variety, decrisper, cfg_rescale, uncond_scale,
+                uc_preset, quality_tags,
                 reference_image, char_ref_style_aware, char_ref_fidelity
             )
             
